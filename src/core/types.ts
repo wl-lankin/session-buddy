@@ -2,7 +2,12 @@
 
 export type Status = "thinking" | "working" | "needs_you" | "finished" | "error" | "idle" | "stale";
 
-export interface Step { tool: string; label: string; at: number; ok: boolean | null }
+/** What a step changed (Edit, Write) or ran (Bash), unfolded under the steps. */
+export type StepDetail =
+  | { kind: "diff"; path: string; hunks: { old: string; new: string }[] }
+  | { kind: "run"; command: string; output: string | null };
+
+export interface Step { tool: string; label: string; at: number; ok: boolean | null; detail?: StepDetail }
 
 export interface Agent {
   id: string;

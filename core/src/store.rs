@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::adopt::{match_processes, Candidate, ClaudeProcess};
-use crate::steps::{approval_target, clip, project_name, step_label};
+use crate::steps::{approval_target, clip, output_tail, project_name, step_detail, step_label, StepDetail};
 
 pub const MAX_STEPS: usize = 50;
 pub const FINISHED_TO_IDLE_MS: i64 = 30_000;
@@ -37,6 +37,8 @@ pub struct Step {
     pub label: String,
     pub at: i64,
     pub ok: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<StepDetail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -258,16 +260,20 @@ impl Session {
         }
     }
 
-    fn push_step(&mut self, tool: &str, label: String, now: i64) {
-        self.steps.push_back(Step { tool: tool.to_string(), label, at: now, ok: None });
+    fn push_step(&mut self, tool: &str, label: String, detail: Option<StepDetail>, now: i64) {
+        self.steps.push_back(Step { tool: tool.to_string(), label, at: now, ok: None, detail });
         while self.steps.len() > MAX_STEPS {
             self.steps.pop_front();
         }
     }
 
-    fn finish_step(&mut self, tool: &str, ok: bool) {
+    /// Closes the open step of `tool`; a command also keeps the end of its output.
+    fn finish_step(&mut self, tool: &str, ok: bool, response: Option<&Value>) {
         if let Some(step) = self.steps.iter_mut().rev().find(|x| x.tool == tool && x.ok.is_none()) {
             step.ok = Some(ok);
+            if let (Some(StepDetail::Run { output, .. }), Some(r)) = (step.detail.as_mut(), response) {
+                *output = output_tail(r);
+            }
         }
     }
 
@@ -472,7 +478,7 @@ impl Store {
                             let d = s(input, "description").unwrap_or_default().to_string();
                             sess.agent_descriptions.push((t, d));
                         }
-                        sess.push_step(&tool, label, now);
+                        sess.push_step(&tool, label, step_detail(&tool, input), now);
                     }
                 }
                 sess.set_status(Status::Working, now);
@@ -482,7 +488,7 @@ impl Store {
                     sess.plan = None;
                 }
                 if agent_id.is_none() {
-                    sess.finish_step(&tool, event == "PostToolUse");
+                    sess.finish_step(&tool, event == "PostToolUse", p.get("tool_response"));
                 }
                 if is_agent_tool {
                     if let Some(resp) = p.get("tool_response") {
@@ -800,6 +806,17 @@ mod tests {
 
     fn sess(store: &Store) -> &Session {
         store.get("s1").expect("session s1")
+    }
+
+    #[test]
+    fn a_command_keeps_the_end_of_its_output() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "npm test"}})), T0);
+        st.apply_hook(&ev("PostToolUse", json!({"tool_name": "Bash", "tool_response": {"stdout": "Tests: 48 passed\n", "stderr": ""}})), T0 + 1);
+        let step = sess(&st).steps.back().unwrap().clone();
+        assert_eq!(step.detail, Some(StepDetail::Run { command: "npm test".into(), output: Some("Tests: 48 passed".into()) }));
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Edit", "tool_input": {"file_path": "/p/a.ts", "old_string": "a", "new_string": "b"}})), T0 + 2);
+        assert!(matches!(sess(&st).steps.back().unwrap().detail, Some(StepDetail::Diff { .. })));
     }
 
     #[test]

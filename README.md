@@ -14,6 +14,7 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 - **Every session at a glance**: project, branch, status, lines changed, context use, model and the current step.
 - **Sub-agents and background tasks** of each session, live.
+- **What a step did**: click an Edit or Write step for its diff, a command for its full text and the end of its output.
 - **Answer from the island**: Allow / Deny permission requests, pick `AskUserQuestion` options, reply to a turn that ends in a question.
 - **Plans** from plan mode, shown read-only while Claude Code waits in its own terminal dialog.
 - **Finished sessions** show a short card with how long the turn took and how Claude's last message starts.
@@ -100,6 +101,7 @@ Claude Code runs a tiny relay, `sb-relay`, for every hook event and as the statu
 - No telemetry, no analytics, no accounts.
 - The only network call is the usage endpoint (`GET https://api.anthropic.com/api/oauth/usage`), with Claude Code's own login token.
 - That token is read fresh each time and never stored or logged.
+- Diffs and the end of command output (at most 1500 characters per stream) only go from the relay to the app and are kept in memory, never written to disk.
 - Everything else stays on your machine.
 
 ## Troubleshooting

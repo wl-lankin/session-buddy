@@ -8,6 +8,8 @@ use crate::output::{wait_kind, WaitKind};
 const MAX_FIELD_LEN: usize = 2_000;
 /// ExitPlanMode's plan is shown on the island, so it may be longer than other fields.
 const MAX_PLAN_LEN: usize = 8_000;
+/// A command's output is only shown by its end ("Tests: 48 passed"): keep that much of each stream.
+const MAX_OUTPUT_TAIL: usize = 1_500;
 
 pub struct Prepared {
     pub line: String,
@@ -47,12 +49,17 @@ pub fn prepare(
     let mut fwd = original.clone();
     let fmap = fwd.as_object_mut()?;
     fmap.remove("transcript_path");
-    let keeps_response = matches!(
-        fmap.get("tool_name").and_then(Value::as_str),
-        Some("Agent") | Some("Task")
-    );
-    if !keeps_response {
-        fmap.remove("tool_response");
+    // Agents need their id and description; commands only the end of their output.
+    match fmap.get("tool_name").and_then(Value::as_str) {
+        Some("Agent") | Some("Task") => {}
+        Some("Bash") | Some("PowerShell") => {
+            if let Some(resp) = fmap.remove("tool_response") {
+                fmap.insert("tool_response".into(), output_tails(&resp));
+            }
+        }
+        _ => {
+            fmap.remove("tool_response");
+        }
     }
     fmap.insert("term_program".into(), Value::String(term_program.to_string()));
     fmap.insert("sb_kind".into(), Value::String("hook".into()));
@@ -78,6 +85,31 @@ pub fn prepare(
     let mut line = fwd.to_string();
     line.push('\n');
     Some(Prepared { line, original, wait })
+}
+
+/// The end of each output stream; truncate_strings would keep the start instead.
+fn output_tails(resp: &Value) -> Value {
+    let tail = |s: &str| {
+        let n = s.chars().count();
+        if n <= MAX_OUTPUT_TAIL {
+            return s.to_string();
+        }
+        let cut: String = s.chars().skip(n - MAX_OUTPUT_TAIL).collect();
+        format!("\u{2026}{cut}")
+    };
+    match resp {
+        Value::String(s) => Value::String(tail(s)),
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for key in ["stdout", "stderr"] {
+                if let Some(s) = map.get(key).and_then(Value::as_str) {
+                    out.insert(key.into(), Value::String(tail(s)));
+                }
+            }
+            Value::Object(out)
+        }
+        _ => Value::Null,
+    }
 }
 
 fn cap(s: String, max: usize) -> String {
@@ -128,11 +160,22 @@ mod tests {
     }
 
     #[test]
-    fn keeps_tool_response_only_for_agent_calls() {
-        let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"x"}}"#;
+    fn keeps_tool_response_only_for_agents_and_command_output() {
+        let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":{"file":{"content":"secret"}}}"#;
         assert!(fwd(&prepare(raw, "", "", "", no_pid).unwrap()).get("tool_response").is_none());
         let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_response":{"agentId":"a1","description":"d"}}"#;
         assert_eq!(fwd(&prepare(raw, "", "", "", no_pid).unwrap())["tool_response"]["agentId"], "a1");
+        let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"ok","stderr":"","interrupted":false}}"#;
+        assert_eq!(fwd(&prepare(raw, "", "", "", no_pid).unwrap())["tool_response"], json!({"stdout": "ok", "stderr": ""}));
+    }
+
+    #[test]
+    fn command_output_keeps_its_end() {
+        let out = format!("{}END", "x".repeat(5_000));
+        let raw = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_response": {"stdout": out}}).to_string();
+        let stdout = fwd(&prepare(raw.as_bytes(), "", "", "", no_pid).unwrap())["tool_response"]["stdout"].as_str().unwrap().to_string();
+        assert!(stdout.ends_with("END"));
+        assert_eq!(stdout.chars().count(), MAX_OUTPUT_TAIL + 1);
     }
 
     #[test]

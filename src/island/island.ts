@@ -250,6 +250,7 @@ export class Island {
       Sound.play("close");
       this.resetSize();
       State.answerOpenFor = null;
+      State.stepOpen = null;
       State.showRecent = false;
       State.isPinned = false;
       this.fsm.pinned = false;

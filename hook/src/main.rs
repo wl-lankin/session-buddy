@@ -6,6 +6,7 @@
 
 mod output;
 mod prepare;
+mod process;
 mod transport;
 #[cfg(windows)]
 mod win;
@@ -36,7 +37,7 @@ fn hook(arg_event: &str) {
     let raw = read_stdin();
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     let term = std::env::var("TERM_PROGRAM").unwrap_or_default();
-    let Some(p) = prepare::prepare(&raw, arg_event, &cwd, &term) else { return };
+    let Some(p) = prepare::prepare(&raw, arg_event, &cwd, &term, process::claude_pid) else { return };
     let budget = p.wait.map(|k| k.budget()).unwrap_or(FIRE_AND_FORGET_BUDGET);
     let answer = send_within(p.line.clone(), p.wait.is_some(), budget);
     if let (Some(kind), Some(answer)) = (p.wait, answer) {
@@ -66,6 +67,9 @@ fn statusline(quiet: bool) {
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return };
     let Some(map) = value.as_object_mut() else { return };
     map.insert("sb_kind".into(), serde_json::Value::String("statusline".into()));
+    if let Some(pid) = process::claude_pid() {
+        map.insert("sb_claude_pid".into(), serde_json::Value::from(pid));
+    }
     let mut line = value.to_string();
     line.push('\n');
     let _ = send_within(line, false, STATUSLINE_BUDGET);

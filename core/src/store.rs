@@ -109,6 +109,10 @@ pub struct Session {
     pub pending: VecDeque<Interaction>,
     pub started_at: i64,
     pub last_event_at: i64,
+    /// The Claude Code process behind the session, as reported by the relay.
+    pub pid: Option<u32>,
+    /// True once a hook or status-line event arrived; false for sessions seeded from transcripts.
+    pub live: bool,
     /// (subagent_type, description) from main-thread Agent calls, waiting for their SubagentStart.
     #[serde(skip)]
     pub agent_descriptions: Vec<(String, String)>,
@@ -177,6 +181,8 @@ impl Session {
             pending: VecDeque::new(),
             started_at: now,
             last_event_at: now,
+            pid: None,
+            live: false,
             agent_descriptions: Vec::new(),
             branch_checked_at: i64::MIN / 2,
         }
@@ -267,10 +273,14 @@ impl Store {
         list
     }
 
-    /// Finds or creates the session and refreshes cwd / project / terminal.
+    /// Finds or creates the session, marks it live, records the relay's pid and refreshes cwd / project / terminal.
     fn touch(&mut self, p: &Value, now: i64) -> Option<&mut Session> {
         let id = s(p, "session_id")?;
         let sess = self.sessions.entry(id.to_string()).or_insert_with(|| Session::new(id, now));
+        sess.live = true;
+        if let Some(pid) = p.get("sb_claude_pid").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()) {
+            sess.pid = Some(pid);
+        }
         if let Some(cwd) = s(p, "cwd") {
             if sess.cwd != cwd {
                 sess.cwd = cwd.to_string();
@@ -902,5 +912,33 @@ mod tests {
         assert_eq!(v[0]["pending"][0]["requestId"], "r1");
         assert!(v[0].get("agentDescriptions").is_none());
         assert!(v[0]["stats"].get("linesAdded").is_some());
+    }
+
+    #[test]
+    fn records_the_claude_pid_latest_wins_and_marks_live() {
+        let mut st = Store::default();
+        st.seed(Session::new("s1", T0));
+        assert!(!sess(&st).live, "a seeded session is only recent");
+        assert_eq!(sess(&st).pid, None);
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Read"})), T0 + 1);
+        assert!(sess(&st).live, "any hook event makes it live");
+        assert_eq!(sess(&st).pid, None);
+        st.apply_hook(&ev("UserPromptSubmit", json!({"sb_claude_pid": 100})), T0 + 2);
+        assert_eq!(sess(&st).pid, Some(100));
+        st.apply_hook(&ev("PostToolUse", json!({"tool_name": "Read"})), T0 + 3);
+        assert_eq!(sess(&st).pid, Some(100), "events without the field keep the pid");
+        st.apply_statusline(&json!({"session_id": "s1", "sb_claude_pid": 200}), T0 + 4);
+        assert_eq!(sess(&st).pid, Some(200));
+        let v = serde_json::to_value(st.snapshot()).unwrap();
+        assert_eq!(v[0]["pid"], 200);
+        assert_eq!(v[0]["live"], true);
+    }
+
+    #[test]
+    fn status_line_alone_makes_a_seeded_session_live() {
+        let mut st = Store::default();
+        st.seed(Session::new("s1", T0));
+        st.apply_statusline(&json!({"session_id": "s1"}), T0 + 1);
+        assert!(sess(&st).live);
     }
 }

@@ -209,6 +209,8 @@ mod tests {
         assert_eq!(fresh.project, "bankconnect");
         assert_eq!(fresh.model.as_deref(), Some("claude-opus-5-5"));
         assert_eq!(fresh.last_event_at, 1_000);
+        assert!(!fresh.live, "seeded sessions stay recent until their first event");
+        assert_eq!(fresh.pid, None);
         let old = session_from_seed(&seed, 1_000 + 11 * 60_000, 10 * 60_000);
         assert_eq!(old.status, Status::Stale);
     }

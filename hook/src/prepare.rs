@@ -7,13 +7,23 @@ use crate::output::{wait_kind, WaitKind};
 
 const MAX_FIELD_LEN: usize = 2_000;
 
+/// Finding the Claude Code process costs about 15 ms on Windows, so only the
+/// events that start, prompt and end a turn carry it (the status line does too).
+const PID_EVENTS: [&str; 3] = ["SessionStart", "UserPromptSubmit", "Stop"];
+
 pub struct Prepared {
     pub line: String,
     pub original: Value,
     pub wait: Option<WaitKind>,
 }
 
-pub fn prepare(raw: &[u8], arg_event: &str, cwd: &str, term_program: &str) -> Option<Prepared> {
+pub fn prepare(
+    raw: &[u8],
+    arg_event: &str,
+    cwd: &str,
+    term_program: &str,
+    claude_pid: impl FnOnce() -> Option<u32>,
+) -> Option<Prepared> {
     let bytes = raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(raw);
     if bytes.is_empty() {
         return None;
@@ -52,6 +62,12 @@ pub fn prepare(raw: &[u8], arg_event: &str, cwd: &str, term_program: &str) -> Op
         "sb_wait".into(),
         wait.map(|k| Value::String(k.as_str().into())).unwrap_or(Value::Null),
     );
+    let event = fmap.get("hook_event_name").and_then(Value::as_str).unwrap_or_default();
+    if PID_EVENTS.contains(&event) {
+        if let Some(pid) = claude_pid() {
+            fmap.insert("sb_claude_pid".into(), Value::from(pid));
+        }
+    }
     truncate_strings(&mut fwd);
 
     let mut line = fwd.to_string();
@@ -79,6 +95,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn no_pid() -> Option<u32> {
+        None
+    }
+
     fn fwd(p: &Prepared) -> Value {
         assert!(p.line.ends_with('\n'));
         serde_json::from_str(p.line.trim_end()).unwrap()
@@ -88,7 +108,7 @@ mod tests {
     fn strips_bom_and_fills_event_cwd_and_terminal() {
         let mut raw = vec![0xEF, 0xBB, 0xBF];
         raw.extend_from_slice(br#"{"session_id":"s1","transcript_path":"x"}"#);
-        let p = prepare(&raw, "SessionStart", "C:/work", "WarpTerminal").unwrap();
+        let p = prepare(&raw, "SessionStart", "C:/work", "WarpTerminal", no_pid).unwrap();
         let v = fwd(&p);
         assert_eq!(v["hook_event_name"], "SessionStart");
         assert_eq!(v["cwd"], "C:/work");
@@ -102,9 +122,9 @@ mod tests {
     #[test]
     fn keeps_tool_response_only_for_agent_calls() {
         let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"x"}}"#;
-        assert!(fwd(&prepare(raw, "", "", "").unwrap()).get("tool_response").is_none());
+        assert!(fwd(&prepare(raw, "", "", "", no_pid).unwrap()).get("tool_response").is_none());
         let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_response":{"agentId":"a1","description":"d"}}"#;
-        assert_eq!(fwd(&prepare(raw, "", "", "").unwrap())["tool_response"]["agentId"], "a1");
+        assert_eq!(fwd(&prepare(raw, "", "", "", no_pid).unwrap())["tool_response"]["agentId"], "a1");
     }
 
     #[test]
@@ -114,7 +134,7 @@ mod tests {
             "hook_event_name":"PreToolUse","tool_name":"AskUserQuestion",
             "tool_input":{"questions":[{"question": long}]}
         })).unwrap();
-        let p = prepare(&raw, "", "", "").unwrap();
+        let p = prepare(&raw, "", "", "", no_pid).unwrap();
         assert_eq!(p.wait, Some(WaitKind::Question));
         assert_eq!(fwd(&p)["sb_wait"], "question");
         let forwarded = fwd(&p)["tool_input"]["questions"][0]["question"].as_str().unwrap().to_string();
@@ -124,9 +144,27 @@ mod tests {
 
     #[test]
     fn rejects_garbage() {
-        assert!(prepare(b"", "Stop", "", "").is_none());
-        assert!(prepare(b"not json", "Stop", "", "").is_none());
-        assert!(prepare(b"[1,2]", "Stop", "", "").is_none());
+        assert!(prepare(b"", "Stop", "", "", no_pid).is_none());
+        assert!(prepare(b"not json", "Stop", "", "", no_pid).is_none());
+        assert!(prepare(b"[1,2]", "Stop", "", "", no_pid).is_none());
+    }
+
+    #[test]
+    fn claude_pid_only_on_turn_events() {
+        for event in ["SessionStart", "UserPromptSubmit", "Stop"] {
+            let p = prepare(br#"{"session_id":"s1"}"#, event, "", "", || Some(4242)).unwrap();
+            assert_eq!(fwd(&p)["sb_claude_pid"], 4242, "{event}");
+        }
+        let looked = std::cell::Cell::new(false);
+        let p = prepare(br#"{"hook_event_name":"PreToolUse","session_id":"s1"}"#, "", "", "", || {
+            looked.set(true);
+            Some(4242)
+        })
+        .unwrap();
+        assert!(fwd(&p).get("sb_claude_pid").is_none());
+        assert!(!looked.get(), "the process walk is skipped for other events");
+        let p = prepare(br#"{"session_id":"s1"}"#, "Stop", "", "", no_pid).unwrap();
+        assert!(fwd(&p).get("sb_claude_pid").is_none(), "no pid, no field");
     }
 
     #[test]

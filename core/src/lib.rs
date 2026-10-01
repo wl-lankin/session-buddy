@@ -1,6 +1,7 @@
 //! session-buddy's core: everything that can be tested without a window.
 
 pub mod bootstrap;
+pub mod branch;
 pub mod claude_settings;
 pub mod hub;
 pub mod steps;

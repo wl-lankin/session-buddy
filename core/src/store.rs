@@ -223,7 +223,12 @@ impl Session {
                 self.turn_started_at.get_or_insert(now);
             }
             Status::NeedsYou => {}
-            _ => self.turn_started_at = None,
+            Status::Finished => self.turn_started_at = None,
+            // Esc at the terminal's plan dialog sends no Stop: a quiet or failed session drops its plan.
+            Status::Idle | Status::Stale | Status::Error => {
+                self.turn_started_at = None;
+                self.plan = None;
+            }
         }
     }
 
@@ -426,7 +431,8 @@ impl Store {
                     sess.set_status(Status::Working, now);
                 }
             }
-            "PermissionRequest" if is_plan && request_id.is_none() => sess.plan = plan_text.or(Some(String::new())),
+            // Never a pending card: Claude Code ignores a hook answer for ExitPlanMode.
+            "PermissionRequest" if is_plan => sess.plan = plan_text.or(Some(String::new())),
             "PermissionRequest" => {
                 if let Some(request_id) = request_id {
                     sess.pending.push_back(Interaction::Approval {
@@ -1114,11 +1120,34 @@ mod tests {
     }
 
     #[test]
-    fn exit_plan_mode_from_an_old_blocking_relay_still_queues() {
+    fn exit_plan_mode_never_becomes_a_pending_card() {
+        // Even with a request id (an old blocking relay): Claude Code ignores the hook answer.
         let mut st = Store::default();
         let cues = st.apply_hook(&ev("PermissionRequest", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "x"}, "sb_request_id": "r1", "sb_wait_ms": 1})), T0);
-        assert_eq!(cues[0].kind, CueKind::Approval);
-        assert_eq!(sess(&st).pending.len(), 1);
+        assert!(cues.is_empty());
+        assert!(sess(&st).pending.is_empty());
+        assert_eq!(sess(&st).plan.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn the_plan_clears_when_the_session_goes_idle_stale_or_error() {
+        let with_plan = || {
+            let mut st = Store::default();
+            st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "plan"})), T0);
+            st.apply_hook(&ev("PreToolUse", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "x"}})), T0 + 1);
+            st
+        };
+        // Esc at the terminal's plan dialog sends no Stop: the session just goes quiet.
+        let mut st = with_plan();
+        st.tick(T0 + 1 + DEFAULT_STALE_AFTER_MS);
+        assert_eq!(sess(&st).status, Status::Stale);
+        assert_eq!(sess(&st).plan, None, "stale");
+        let mut st = with_plan();
+        st.apply_hook(&ev("StopFailure", json!({})), T0 + 2);
+        assert_eq!(sess(&st).plan, None, "error");
+        let mut st = with_plan();
+        st.sessions.get_mut("s1").unwrap().set_status(Status::Idle, T0 + 2);
+        assert_eq!(sess(&st).plan, None, "idle");
     }
 
     #[test]

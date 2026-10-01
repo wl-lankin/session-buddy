@@ -16,7 +16,10 @@ const TAIL_LINES: usize = 200;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Seed {
     pub session_id: String,
+    /// The latest cwd in the tail.
     pub cwd: String,
+    /// The first cwd in the tail: it names the project.
+    pub first_cwd: String,
     pub last_prompt: Option<String>,
     pub last_message: Option<String>,
     pub model: Option<String>,
@@ -43,6 +46,7 @@ fn text_of(content: &Value) -> Option<String> {
 pub struct Tail {
     pub id: Option<String>,
     pub cwd: Option<String>,
+    pub first_cwd: Option<String>,
     pub prompt: Option<String>,
     pub message: Option<String>,
     pub model: Option<String>,
@@ -50,6 +54,7 @@ pub struct Tail {
 
 pub fn parse_tail(text: &str) -> Tail {
     let (mut id, mut cwd, mut prompt, mut message, mut model) = (None, None, None, None, None);
+    let mut first_cwd: Option<String> = None;
     for line in text.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         if let Some(s) = v.get("sessionId").and_then(Value::as_str) {
@@ -57,6 +62,7 @@ pub fn parse_tail(text: &str) -> Tail {
         }
         if let Some(c) = v.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()) {
             cwd = Some(c.to_string());
+            first_cwd.get_or_insert_with(|| c.to_string());
         }
         if v.get("isMeta").and_then(Value::as_bool).unwrap_or(false) {
             continue;
@@ -83,7 +89,7 @@ pub fn parse_tail(text: &str) -> Tail {
             _ => {}
         }
     }
-    Tail { id, cwd, prompt, message, model }
+    Tail { id, cwd, first_cwd, prompt, message, model }
 }
 
 fn read_tail(path: &Path) -> Option<String> {
@@ -122,9 +128,9 @@ pub fn scan(projects_dir: &Path, now: i64, max_age_ms: i64) -> Vec<Seed> {
                 continue;
             }
             let Some(text) = read_tail(&path) else { continue };
-            let Tail { id, cwd, prompt: last_prompt, message: last_message, model } = parse_tail(&text);
+            let Tail { id, cwd, first_cwd, prompt: last_prompt, message: last_message, model } = parse_tail(&text);
             let session_id = id.unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
-            seeds.push(Seed { session_id, cwd: cwd.unwrap_or_default(), last_prompt, last_message, model, modified_ms: mtime });
+            seeds.push(Seed { session_id, cwd: cwd.unwrap_or_default(), first_cwd: first_cwd.unwrap_or_default(), last_prompt, last_message, model, modified_ms: mtime });
         }
     }
     seeds.sort_by_key(|s| s.modified_ms);
@@ -134,8 +140,9 @@ pub fn scan(projects_dir: &Path, now: i64, max_age_ms: i64) -> Vec<Seed> {
 pub fn session_from_seed(seed: &Seed, now: i64, stale_after_ms: i64) -> Session {
     let mut s = Session::new(&seed.session_id, seed.modified_ms);
     s.cwd = seed.cwd.clone();
-    s.project = project_name(&seed.cwd);
-    s.first_cwd = (!seed.cwd.is_empty()).then(|| seed.cwd.clone());
+    let first = if seed.first_cwd.is_empty() { &seed.cwd } else { &seed.first_cwd };
+    s.project = project_name(first);
+    s.first_cwd = (!first.is_empty()).then(|| first.clone());
     s.last_prompt = seed.last_prompt.clone();
     s.last_message = seed.last_message.clone();
     s.model = seed.model.clone();
@@ -158,6 +165,7 @@ mod tests {
         lines(&[
             json!({"type":"user","sessionId":"s1","cwd":"C:\\Projects\\pushdocs","message":{"role":"user","content":"<command-name>/clear</command-name>"}}),
             json!({"type":"user","sessionId":"s1","cwd":"C:\\Projects\\pushdocs","message":{"role":"user","content":"fix the DATEV 409 handling"}}),
+            json!({"type":"user","sessionId":"s1","cwd":"C:\\Projects\\pushdocs\\api","message":{"content":[{"type":"tool_result","content":"..."}]}}),
             json!({"type":"assistant","sessionId":"s1","message":{"model":"claude-sonnet-4-5","content":[{"type":"tool_use","name":"Read"}]}}),
             json!({"type":"user","sessionId":"s1","message":{"content":[{"type":"tool_result","content":"..."}]}}),
             json!({"type":"user","sessionId":"s1","isMeta":true,"message":{"content":"meta noise"}}),
@@ -169,9 +177,10 @@ mod tests {
 
     #[test]
     fn parses_last_real_prompt_and_message() {
-        let Tail { id, cwd, prompt, message: msg, model } = parse_tail(&transcript());
+        let Tail { id, cwd, first_cwd, prompt, message: msg, model } = parse_tail(&transcript());
         assert_eq!(id.as_deref(), Some("s1"));
-        assert_eq!(cwd.as_deref(), Some("C:\\Projects\\pushdocs"));
+        assert_eq!(cwd.as_deref(), Some("C:\\Projects\\pushdocs\\api"), "the session is in its latest cwd");
+        assert_eq!(first_cwd.as_deref(), Some("C:\\Projects\\pushdocs"), "the project comes from the first one");
         assert_eq!(prompt.as_deref(), Some("fix the DATEV 409 handling"));
         assert_eq!(msg.as_deref(), Some("Fixed. Tests pass."));
         assert_eq!(model.as_deref(), Some("claude-opus-5-5"), "the last assistant message's model wins");
@@ -206,11 +215,12 @@ mod tests {
 
     #[test]
     fn seed_becomes_idle_or_stale() {
-        let seed = Seed { session_id: "s1".into(), cwd: "/p/bankconnect".into(), last_prompt: Some("p".into()), last_message: None, model: Some("claude-opus-5-5".into()), modified_ms: 1_000 };
+        let seed = Seed { session_id: "s1".into(), cwd: "/p/bankconnect/sub".into(), first_cwd: "/p/bankconnect".into(), last_prompt: Some("p".into()), last_message: None, model: Some("claude-opus-5-5".into()), modified_ms: 1_000 };
         let fresh = session_from_seed(&seed, 1_000 + 60_000, 10 * 60_000);
         assert_eq!(fresh.status, Status::Idle);
         assert_eq!(fresh.project, "bankconnect");
-        assert_eq!(fresh.first_cwd.as_deref(), Some("/p/bankconnect"), "the seed's cwd names the project for good");
+        assert_eq!(fresh.first_cwd.as_deref(), Some("/p/bankconnect"), "the first cwd names the project for good");
+        assert_eq!(fresh.cwd, "/p/bankconnect/sub");
         assert_eq!(fresh.model.as_deref(), Some("claude-opus-5-5"));
         assert_eq!(fresh.last_event_at, 1_000);
         assert!(!fresh.live, "seeded sessions stay recent until their first event");

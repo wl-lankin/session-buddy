@@ -89,7 +89,10 @@ impl Hub {
             return;
         }
 
-        let wait = payload.get("sb_wait").and_then(Value::as_str).map(str::to_string);
+        // Claude Code ignores a hook answer for ExitPlanMode, so never hold an old relay that still waits:
+        // closing without an ack hands the dialog back to the terminal.
+        let plan_mode = payload.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode");
+        let wait = payload.get("sb_wait").and_then(Value::as_str).filter(|_| !plan_mode).map(str::to_string);
         let Some(kind) = wait else {
             let cues = self.store.lock().unwrap().apply_hook(&payload, now_ms());
             (self.notify)(cues);
@@ -261,6 +264,19 @@ mod tests {
 
     fn permission(session: &str) -> Value {
         json!({"sb_kind":"hook","sb_wait":"permission","hook_event_name":"PermissionRequest","session_id":session,"cwd":"/p/x","tool_name":"Bash","tool_input":{"command":"ls"}})
+    }
+
+    #[tokio::test]
+    async fn exit_plan_mode_from_an_old_relay_never_blocks() {
+        let h = hub();
+        let payload = json!({"sb_kind":"hook","sb_wait":"permission","hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/p/x","tool_name":"ExitPlanMode","tool_input":{"plan":"## Plan"}});
+        let (task, client) = send(&h, payload).await;
+        // The hub closes at once without an ack: the old relay hands the dialog back to the terminal.
+        tokio::time::timeout(Duration::from_millis(300), task).await.expect("serve returns at once").unwrap();
+        assert!(read_lines(client).await.is_empty());
+        assert!(pending_id(&h).is_none());
+        assert!(h.pending.lock().unwrap().is_empty());
+        assert_eq!(h.store.lock().unwrap().get("s1").unwrap().plan.as_deref(), Some("## Plan"));
     }
 
     #[tokio::test]

@@ -16,18 +16,18 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "docs", "media");
 const MAX_BYTES = 400 * 1024;
 
-// [name, page, width, height]. The island windows are 800 wide like the real panel;
+// [name, page, width, height]. The island windows are 960 wide like the real panel;
 // a height of 0 fits the page's full height (the settings window scrolls).
 const SHOTS = [
-  ["strip", "dev/shots.html?state=strip", 520, 56],
+  ["strip", "dev/shots.html?state=strip", 620, 56],
   ["compact", "dev/shots.html?state=compact", 620, 96],
-  ["expanded", "dev/shots.html?state=expanded", 800, 400],
-  ["approval", "dev/shots.html?state=approval", 800, 260],
-  ["question", "dev/shots.html?state=question", 800, 440],
-  ["reply", "dev/shots.html?state=reply", 800, 260],
-  ["plan", "dev/shots.html?state=plan", 800, 340],
-  ["finished", "dev/shots.html?state=finished", 800, 190],
-  ["finished-merged", "dev/shots.html?state=finished-merged", 800, 190],
+  ["expanded", "dev/shots.html?state=expanded", 960, 400],
+  ["approval", "dev/shots.html?state=approval", 960, 260],
+  ["question", "dev/shots.html?state=question", 960, 440],
+  ["reply", "dev/shots.html?state=reply", 960, 260],
+  ["plan", "dev/shots.html?state=plan", 960, 340],
+  ["finished", "dev/shots.html?state=finished", 960, 190],
+  ["finished-merged", "dev/shots.html?state=finished-merged", 960, 190],
   ["settings", "settings.html?demo=1", 600, 0],
 ];
 

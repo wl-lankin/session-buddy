@@ -27,7 +27,7 @@ When you run several Claude Code sessions in Warp at once, one of them is always
 |---|---|
 | ![Strip](docs/media/strip.png) | **Strip.** Always on screen: how many sessions, who is working, who needs you, your limits. |
 | ![Compact](docs/media/compact.png) | **Compact.** Hover the strip: one session with branch, lines and current step. Scroll to flip sessions. |
-| ![Expanded](docs/media/expanded.png) | **Expanded.** Click: tabs for all sessions, steps, sub-agents, background tasks, limits and account. |
+| ![Expanded](docs/media/expanded.png) | **Expanded.** Click: tabs for the running sessions (recent ones behind a pill), steps, sub-agents, background tasks, limits and account. |
 | ![Permission request](docs/media/approval.png) | **Permission.** Allow or Deny a tool call, or hand it back to the terminal. |
 | ![Question](docs/media/question.png) | **Question.** `AskUserQuestion` options, multi-select and a free "Other..." answer. |
 | ![Reply](docs/media/reply.png) | **Reply.** Claude ended its turn with a question: type the answer right here. |

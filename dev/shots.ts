@@ -32,7 +32,7 @@ const USAGE: Usage = {
   source: "statusline",
   updatedAt: NOW,
   error: null,
-  account: { email: "alex@example.com", org: null, plan: "Max" },
+  account: { email: "alex.morgan@example.com", org: null, plan: "Max" },
 };
 
 function sessions(): Session[] {
@@ -50,6 +50,8 @@ function sessions(): Session[] {
       agents: [
         { id: "ag1", agentType: "Explore", description: "Find webhook callers", running: true, currentStep: "Search · onPaymentFailed", startedAt: NOW - 90_000, endedAt: null },
         { id: "ag2", agentType: "Plan", description: "Plan the retry queue", running: false, currentStep: null, startedAt: NOW - 8 * MIN, endedAt: NOW - 5 * MIN },
+        { id: "ag3", agentType: "Explore", description: "Map the webhook routes", running: false, currentStep: null, startedAt: NOW - 12 * MIN, endedAt: NOW - 10 * MIN },
+        { id: "ag4", agentType: "general-purpose", description: null, running: false, currentStep: null, startedAt: NOW - 14 * MIN, endedAt: NOW - 13 * MIN },
       ],
       background: [{ id: "bg1", kind: "bash", status: "running", description: "npm run dev", agentType: null }],
       stats: { linesAdded: 142, linesRemoved: 37, contextUsedPct: 46, contextTokens: 92_000, contextSize: 200_000, costUsd: 1.6 },
@@ -72,6 +74,9 @@ function sessions(): Session[] {
       steps: [{ tool: "Edit", label: "Edit · ProfileScreen.tsx", at: NOW - 10_000, ok: null }],
       stats: { linesAdded: 61, linesRemoved: 12, contextUsedPct: 33, contextTokens: 66_000, contextSize: 200_000, costUsd: 0.9 },
     }),
+    // Seen only in transcripts since the start: hidden behind the "Recent" pill.
+    base("old-api", "api-gateway", { live: false, status: "idle", startedAt: NOW - 90 * MIN, lastPrompt: "bump the rate limiter" }),
+    base("old-infra", "infra", { live: false, status: "stale", startedAt: NOW - 100 * MIN }),
   ];
 }
 
@@ -126,7 +131,8 @@ async function run() {
   const list = sessions();
   switch (state) {
     case "strip":
-      island.onSnapshot(snap(list));
+      // A session that waits for the user, without a card (that would open the island).
+      island.onSnapshot(snap(withSession(list, "docs", { status: "needs_you" })));
       break;
     case "compact":
       island.onSnapshot(snap(list));

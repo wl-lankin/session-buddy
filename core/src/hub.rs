@@ -17,6 +17,9 @@ use crate::store::{Cue, Store};
 
 const MAX_LINE: usize = 1 << 20;
 const ALREADY_ANSWERED: &str = "This question was already answered in the terminal.";
+/// Tells the relay the card is on screen, so it keeps waiting (same literal in hook/src/transport.rs).
+const ACK_LINE: &[u8] = b"{\"sb_ack\":true}
+";
 
 pub enum Reply {
     Ack,
@@ -103,7 +106,7 @@ impl Hub {
         (self.notify)(cues);
 
         let mut guard = PendingGuard { hub: &self, id, answered: false };
-        let outcome = self.wait(&mut rx, budget, &mut rd).await;
+        let outcome = self.wait(&mut rx, budget, &mut rd, &mut wr).await;
         guard.answered = outcome.is_some();
         drop(guard);
 
@@ -113,19 +116,25 @@ impl Hub {
         }
     }
 
-    /// Two waits: a short one for "the card is on screen", then the long one for a human.
-    async fn wait<R: AsyncRead + Unpin>(
+    /// Two waits: a short one for "the card is on screen" (passed on to the relay as
+    /// one ack line), then the long one for a human.
+    async fn wait<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         &self,
         rx: &mut mpsc::Receiver<Reply>,
         budget: Duration,
         rd: &mut R,
+        wr: &mut W,
     ) -> Option<String> {
         let first = tokio::select! {
             r = tokio::time::timeout(self.ack_timeout, rx.recv()) => r,
             _ = closed(rd) => return None,
         };
         match first {
-            Ok(Some(Reply::Ack)) => {}
+            Ok(Some(Reply::Ack)) => {
+                if wr.write_all(ACK_LINE).await.is_err() || wr.flush().await.is_err() {
+                    return None;
+                }
+            }
             Ok(Some(Reply::Answer(a))) => return Some(a),
             _ => return None,
         }
@@ -224,10 +233,16 @@ mod tests {
         (task, client)
     }
 
-    async fn read_answer(client: tokio::io::DuplexStream) -> String {
-        let mut line = String::new();
-        let _ = BufReader::new(client).read_line(&mut line).await;
-        line.trim().to_string()
+    const ACK: &str = r#"{"sb_ack":true}"#;
+
+    /// Every line the relay receives until the hub closes the connection.
+    async fn read_lines(client: tokio::io::DuplexStream) -> Vec<String> {
+        let mut lines = BufReader::new(client).lines();
+        let mut out = Vec::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            out.push(line);
+        }
+        out
     }
 
     fn pending_id(h: &Hub) -> Option<String> {
@@ -271,9 +286,19 @@ mod tests {
         let id = wait_for_pending(&h).await;
         h.ack(&id);
         h.answer(&id, &json!({"behavior":"allow"})).unwrap();
-        assert_eq!(read_answer(client).await, r#"{"behavior":"allow"}"#);
+        assert_eq!(read_lines(client).await, vec![ACK.to_string(), r#"{"behavior":"allow"}"#.to_string()]);
         task.await.unwrap();
         assert!(pending_id(&h).is_none());
+    }
+
+    #[tokio::test]
+    async fn answer_before_ack_reaches_relay_without_ack_line() {
+        let h = hub();
+        let (task, client) = send(&h, permission("s1")).await;
+        let id = wait_for_pending(&h).await;
+        h.answer(&id, &json!({"behavior":"deny"})).unwrap();
+        assert_eq!(read_lines(client).await, vec![r#"{"behavior":"deny"}"#.to_string()]);
+        task.await.unwrap();
     }
 
     #[tokio::test]
@@ -281,8 +306,8 @@ mod tests {
         let h = hub();
         let (task, client) = send(&h, permission("s1")).await;
         let _ = wait_for_pending(&h).await;
-        let line = tokio::time::timeout(Duration::from_millis(1200), read_answer(client)).await.expect("closed after the ack timeout, not the long budget");
-        assert_eq!(line, "");
+        let lines = tokio::time::timeout(Duration::from_millis(1200), read_lines(client)).await.expect("closed after the ack timeout, not the long budget");
+        assert!(lines.is_empty(), "no ack line without an ack: {lines:?}");
         task.await.unwrap();
         assert!(pending_id(&h).is_none());
     }
@@ -294,8 +319,8 @@ mod tests {
         let id = wait_for_pending(&h).await;
         h.ack(&id);
         h.release(&id);
-        let line = tokio::time::timeout(Duration::from_millis(300), read_answer(client)).await.expect("release observed well before the deadline");
-        assert_eq!(line, "");
+        let lines = tokio::time::timeout(Duration::from_millis(300), read_lines(client)).await.expect("release observed well before the deadline");
+        assert_eq!(lines, vec![ACK.to_string()]);
         task.await.unwrap();
         assert!(pending_id(&h).is_none());
     }
@@ -306,7 +331,7 @@ mod tests {
         let (task, client) = send(&h, permission("s1")).await;
         let id = wait_for_pending(&h).await;
         h.ack(&id);
-        assert_eq!(read_answer(client).await, "");
+        assert_eq!(read_lines(client).await, vec![ACK.to_string()]);
         task.await.unwrap();
         assert!(h.answer(&id, &json!({"behavior":"allow"})).is_err());
     }
@@ -363,8 +388,8 @@ mod tests {
         h.ack(&id_b);
         h.answer(&id_b, &json!({"answers":{"Q?":"x"}})).unwrap();
         h.answer(&id_a, &json!({"behavior":"deny"})).unwrap();
-        assert_eq!(read_answer(c1).await, r#"{"behavior":"deny"}"#);
-        assert_eq!(read_answer(c2).await, r#"{"answers":{"Q?":"x"}}"#);
+        assert_eq!(read_lines(c1).await, vec![ACK.to_string(), r#"{"behavior":"deny"}"#.to_string()]);
+        assert_eq!(read_lines(c2).await, vec![ACK.to_string(), r#"{"answers":{"Q?":"x"}}"#.to_string()]);
         t1.await.unwrap();
         t2.await.unwrap();
     }

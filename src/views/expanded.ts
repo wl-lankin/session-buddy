@@ -13,7 +13,8 @@ import { bar, keyed, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 const STEP_ROWS = 7;
-const AGENT_ROWS = 5;
+const AGENT_ROWS = 4;
+const BG_ROWS = 2;
 
 const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
 
@@ -105,9 +106,8 @@ function stepsCol(s: Session): Node[] {
 function sideCol(s: Session, now: number): Node[] {
   const out: Node[] = [];
   const running = s.agents.filter((a) => a.running).length;
-  const agents = [...s.agents]
-    .sort((a, b) => Number(b.running) - Number(a.running) || b.startedAt - a.startedAt)
-    .slice(0, AGENT_ROWS);
+  const sorted = [...s.agents].sort((a, b) => Number(b.running) - Number(a.running) || b.startedAt - a.startedAt);
+  const agents = sorted.slice(0, AGENT_ROWS);
   out.push(h("div", { class: "x-h", text: `AGENTS (${running})` }));
   if (!agents.length) out.push(h("div", { class: "x-none", text: "No sub-agents" }));
   for (const a of agents) {
@@ -124,11 +124,12 @@ function sideCol(s: Session, now: number): Node[] {
       ),
     );
   }
+  if (sorted.length > agents.length) out.push(h("div", { class: "x-none", text: `+${sorted.length - agents.length} more` }));
   const agentIds = new Set(s.agents.map((a) => a.id));
   const bg = s.background.filter((b) => !agentIds.has(b.id));
   if (bg.length) {
     out.push(h("div", { class: "x-h", text: `BACKGROUND (${bg.length})` }));
-    for (const b of bg.slice(0, 3)) {
+    for (const b of bg.slice(0, BG_ROWS)) {
       out.push(
         h(
           "div",
@@ -139,6 +140,7 @@ function sideCol(s: Session, now: number): Node[] {
         ),
       );
     }
+    if (bg.length > BG_ROWS) out.push(h("div", { class: "x-none", text: `+${bg.length - BG_ROWS} more` }));
   }
   return out;
 }

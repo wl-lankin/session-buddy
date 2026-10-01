@@ -410,6 +410,10 @@ body {
 .x-tabs { display: flex; gap: 4px; overflow: hidden; flex: 0 0 24px; }
 .x-tabs .tab {
   display: inline-flex;
+  place-items: normal;
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 5px;
   max-width: 132px;
@@ -428,14 +432,14 @@ body {
 
 .x-head { display: flex; flex-direction: column; gap: 3px; }
 .x-title { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
-.x-name { font: 600 14px var(--font); color: var(--ink); }
+.x-name { font: 600 14px var(--font); color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .x-cwd { font: 400 11px var(--mono); color: var(--dim-4); overflow: hidden; text-overflow: ellipsis; }
-.x-meta { display: flex; align-items: center; gap: 14px; font: 500 11.5px var(--mono); color: var(--dim); white-space: nowrap; }
+.x-meta { min-height: 15px; display: flex; align-items: center; gap: 14px; font: 500 11.5px var(--mono); color: var(--dim); white-space: nowrap; }
 .x-lines { color: var(--green-2); }
-.x-model { color: var(--dim-2); font-family: var(--font); }
+.x-model { color: var(--dim-2); font-family: var(--font); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lbl { color: var(--dim-3); }
 
-.x-limits { display: flex; align-items: center; gap: 14px; font: 500 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; }
+.x-limits { min-height: 15px; display: flex; align-items: center; gap: 14px; font: 500 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; }
 .x-reset { color: var(--dim-4); }
 .x-account { margin-left: auto; font-family: var(--font); color: var(--dim-3); overflow: hidden; text-overflow: ellipsis; }
 

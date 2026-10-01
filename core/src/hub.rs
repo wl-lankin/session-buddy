@@ -16,11 +16,27 @@ use crate::now_ms;
 use crate::store::{Cue, Store};
 
 const MAX_LINE: usize = 1 << 20;
+const ALREADY_ANSWERED: &str = "This question was already answered in the terminal.";
 
 pub enum Reply {
     Ack,
     Answer(String),
     Release,
+}
+
+/// Cleans up a pending request on every exit path, including cancellation.
+struct PendingGuard<'a> {
+    hub: &'a Hub,
+    id: String,
+    answered: bool,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.hub.pending.lock().unwrap().remove(&self.id);
+        self.hub.store.lock().unwrap().resolve(&self.id, self.answered, now_ms());
+        (self.hub.notify)(Vec::new());
+    }
 }
 
 type Notify = Box<dyn Fn(Vec<Cue>) + Send + Sync>;
@@ -86,11 +102,10 @@ impl Hub {
         let cues = self.store.lock().unwrap().apply_hook(&payload, now_ms());
         (self.notify)(cues);
 
+        let mut guard = PendingGuard { hub: &self, id, answered: false };
         let outcome = self.wait(&mut rx, budget, &mut rd).await;
-
-        self.pending.lock().unwrap().remove(&id);
-        self.store.lock().unwrap().resolve(&id, outcome.is_some(), now_ms());
-        (self.notify)(Vec::new());
+        guard.answered = outcome.is_some();
+        drop(guard);
 
         if let Some(line) = outcome {
             let _ = wr.write_all(format!("{line}\n").as_bytes()).await;
@@ -131,8 +146,8 @@ impl Hub {
     fn send(&self, request_id: &str, reply: Reply) -> Result<(), String> {
         let tx = self.pending.lock().unwrap().get(request_id).cloned();
         match tx {
-            Some(tx) => tx.try_send(reply).map_err(|e| e.to_string()),
-            None => Err("This question was already answered in the terminal.".into()),
+            Some(tx) => tx.try_send(reply).map_err(|_| ALREADY_ANSWERED.to_string()),
+            None => Err(ALREADY_ANSWERED.into()),
         }
     }
 
@@ -198,7 +213,7 @@ mod tests {
     use tokio::io::{duplex, AsyncBufReadExt, BufReader};
 
     fn hub() -> Arc<Hub> {
-        Hub::with_timeouts(|_| {}, Duration::from_millis(150), Duration::from_millis(600), Duration::from_millis(600))
+        Hub::with_timeouts(|_| {}, Duration::from_millis(400), Duration::from_millis(2000), Duration::from_millis(2000))
     }
 
     async fn send(h: &Arc<Hub>, payload: Value) -> (tokio::task::JoinHandle<()>, tokio::io::DuplexStream) {
@@ -266,7 +281,8 @@ mod tests {
         let h = hub();
         let (task, client) = send(&h, permission("s1")).await;
         let _ = wait_for_pending(&h).await;
-        assert_eq!(read_answer(client).await, "");
+        let line = tokio::time::timeout(Duration::from_millis(1200), read_answer(client)).await.expect("closed after the ack timeout, not the long budget");
+        assert_eq!(line, "");
         task.await.unwrap();
         assert!(pending_id(&h).is_none());
     }
@@ -278,8 +294,10 @@ mod tests {
         let id = wait_for_pending(&h).await;
         h.ack(&id);
         h.release(&id);
-        assert_eq!(read_answer(client).await, "");
+        let line = tokio::time::timeout(Duration::from_millis(300), read_answer(client)).await.expect("release observed well before the deadline");
+        assert_eq!(line, "");
         task.await.unwrap();
+        assert!(pending_id(&h).is_none());
     }
 
     #[tokio::test]
@@ -302,6 +320,18 @@ mod tests {
         drop(client);
         tokio::time::timeout(Duration::from_millis(200), task).await.expect("released promptly").unwrap();
         assert!(pending_id(&h).is_none());
+    }
+
+    #[tokio::test]
+    async fn aborted_serve_cleans_up() {
+        let h = hub();
+        let (task, _client) = send(&h, permission("s1")).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        task.abort();
+        let _ = task.await;
+        assert!(pending_id(&h).is_none());
+        assert!(h.answer(&id, &json!({"behavior":"allow"})).is_err());
     }
 
     #[tokio::test]

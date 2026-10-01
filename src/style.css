@@ -765,7 +765,7 @@ body {
 .i-message { flex: 1 1 auto; min-height: 0; overflow-y: auto; font: 400 12.5px/1.45 var(--font); color: var(--ink-2); white-space: pre-wrap; padding-right: 4px; user-select: text; }
 .i-foot { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .i-head, .i-notice { flex: 0 0 auto; }
-.i-reply { flex: 0 0 auto; overflow: hidden; resize: none; display: block; }
+.i-reply { flex: 0 0 auto; margin-top: 8px; overflow: hidden; resize: none; display: block; }
 .i-reply.overflowing { overflow-y: auto; }
 .i-countdown { font: 500 11px var(--font); color: var(--dim-4); }
 .i-notice { font: 500 11.5px var(--font); color: var(--red-text); }

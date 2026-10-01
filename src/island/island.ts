@@ -144,6 +144,7 @@ export class Island {
       cycle: (dir) => this.cycleFocus(dir),
       expand: () => this.fsm.forceHome(),
       collapse: () => this.collapse(),
+      minimize: () => this.minimize(),
       answer: (requestId, answer) => void this.answer(requestId, answer),
       release: (requestId) => {
         Sound.play("blip");
@@ -286,6 +287,12 @@ export class Island {
     State.isPinned = false;
     this.fsm.pinned = false;
     this.fsm.forcePetit();
+  }
+
+  private minimize() {
+    State.isPinned = false;
+    this.fsm.pinned = false;
+    this.fsm.forceStrip();
   }
 
   /** Something needs the user: open on this view and stay open until it is answered. */

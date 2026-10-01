@@ -332,6 +332,14 @@ const ACCOUNT_CHROME = 23;
 export function buildSessionView(actions: ViewActions): ViewHost {
   const tabsEl = h("div", { class: "x-tabs" });
   const enlarge = enlargeButton(() => actions.toggleEnlarge());
+  const fold = h("button", {
+    class: "enlarge",
+    title: "Minimize to the strip",
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      actions.minimize();
+    },
+  }, svg(ICONS.chevronUp, 14, { stroke: 2 }));
   const headEl = h("div", { class: "x-head" });
   const promptEl = h("div", { class: "x-prompt" });
   const answerEl = h("button", {
@@ -372,7 +380,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { class: "view session-view" },
-    h("div", { class: "blk x-tabs-blk" }, tabsEl, enlarge.el),
+    h("div", { class: "blk x-tabs-blk" }, tabsEl, enlarge.el, fold),
     h("div", { class: "x-main" }, sessionEl, accountEl),
   );
   let acctW = accountWidth(0);

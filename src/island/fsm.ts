@@ -94,6 +94,11 @@ export class IslandStateMachine {
     this.transition("petit");
   }
 
+  forceStrip() {
+    this.cancelTimers();
+    this.transition("strip");
+  }
+
   private scheduleCompactRest() {
     this.clear("compactRest");
     this.compactRest = window.setTimeout(() => {

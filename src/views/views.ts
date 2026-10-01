@@ -14,6 +14,8 @@ export interface ViewActions {
   cycle(dir: 1 | -1): void;
   expand(): void;
   collapse(): void;
+  /** Straight to the strip, without waiting for the compact card to rest. */
+  minimize(): void;
   answer(requestId: string, answer: unknown): void;
   release(requestId: string): void;
   openSettings(): void;

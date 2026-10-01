@@ -103,7 +103,8 @@ pub fn same_dir(a: &str, b: &str, windows: bool) -> bool {
 pub fn project_key(dir: &str) -> String {
     let dir = dir.strip_prefix(r"\\?\").unwrap_or(dir);
     let trimmed = dir.trim_end_matches(['/', '\\']);
-    let dir = if trimmed.is_empty() { dir } else { trimmed };
+    // A root keeps its separator: C:\ is C--, / is -.
+    let dir = if trimmed.is_empty() || trimmed.ends_with(':') { &dir[..(trimmed.len() + 1).min(dir.len())] } else { trimmed };
     dir.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
@@ -111,25 +112,44 @@ fn same_key(a: &str, b: &str, windows: bool) -> bool {
     !a.is_empty() && if windows { a.eq_ignore_ascii_case(b) } else { a == b }
 }
 
-/// (session id, pid) pairs. A process takes the seeded session whose first cwd
-/// or cwd is its working directory, or whose transcript folder is named after it
-/// (the directory Claude Code started in); when several match, the one with the newest
-/// transcript. Each session and each process is used at most once.
+/// The newest of the matching candidates (ties: the smaller id).
+fn newest<'a>(it: impl Iterator<Item = &'a Candidate>, rank: impl Fn(&Candidate) -> bool) -> Option<&'a Candidate> {
+    it.max_by(|a, b| (rank(a), a.modified_ms).cmp(&(rank(b), b.modified_ms)).then_with(|| b.id.cmp(&a.id)))
+}
+
+/// (session id, pid) pairs, independent of the order of `procs` across directories.
+///
+/// Pass 1, the strong link: the session's transcript folder is the process's start
+/// directory encoded (`project_key`); a candidate without a folder uses its first cwd
+/// instead. Among those, one whose cwd or first cwd is exactly that directory comes
+/// first, then the newest transcript.
+/// Pass 2: processes and sessions left over pair on cwd or first cwd, newest first.
+/// Each session and each process is used at most once.
+///
+/// Limits: the key is lossy (`a.b` and `a-b` encode alike, and Claude Code shortens very
+/// long folder names), and processes in one directory are interchangeable, so a pairing
+/// can be wrong or hold a seed whose session already ended. The relay's `sb_claude_pid`
+/// on the next event moves the pid to the right session (`Store::release_pid`).
 pub fn match_processes(candidates: &[Candidate], procs: &[ClaudeProcess], windows: bool) -> Vec<(String, u32)> {
+    let exact = |c: &Candidate, p: &ClaudeProcess| c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows)) || same_dir(&c.cwd, &p.cwd, windows);
+    let strong = |c: &Candidate, p: &ClaudeProcess, key: &str| match c.project_key.as_deref() {
+        Some(k) => same_key(k, key, windows),
+        None => c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows)),
+    };
     let mut taken: Vec<&str> = Vec::new();
-    let mut out = Vec::new();
+    let mut out: Vec<(String, u32)> = Vec::new();
     for p in procs {
         let key = project_key(&p.cwd);
-        let best = candidates
-            .iter()
-            .filter(|c| !taken.contains(&c.id.as_str()))
-            .filter(|c| {
-                c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows))
-                    || same_dir(&c.cwd, &p.cwd, windows)
-                    || c.project_key.as_deref().is_some_and(|k| same_key(k, &key, windows))
-            })
-            .max_by(|a, b| a.modified_ms.cmp(&b.modified_ms).then_with(|| b.id.cmp(&a.id)));
-        if let Some(c) = best {
+        let open = candidates.iter().filter(|c| !taken.contains(&c.id.as_str()) && strong(c, p, &key));
+        if let Some(c) = newest(open, |c| exact(c, p)) {
+            taken.push(&c.id);
+            out.push((c.id.clone(), p.pid));
+        }
+    }
+    let left: Vec<&ClaudeProcess> = procs.iter().filter(|p| !out.iter().any(|(_, pid)| *pid == p.pid)).collect();
+    for p in left {
+        let open = candidates.iter().filter(|c| !taken.contains(&c.id.as_str()) && exact(c, p));
+        if let Some(c) = newest(open, |_| false) {
             taken.push(&c.id);
             out.push((c.id.clone(), p.pid));
         }
@@ -219,6 +239,7 @@ mod tests {
         assert!(is_claude_process(r"C:\Users\a\.local\bin\claude.exe.old.1790878074763.57844", None));
         assert!(is_claude_process("/Users/a/.local/bin/claude.old.1790878074763", None));
         assert!(!is_claude_process(r"C:\x\claude-helper.exe.old.1.2", None));
+        assert!(!is_claude_process(r"C:\Users\a\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe.old.1.2", None), "a renamed desktop app stays out");
     }
 
     #[test]
@@ -238,6 +259,34 @@ mod tests {
         assert_eq!(project_key(r"\\?\C:\Projects"), "C--Projects");
         assert_eq!(project_key(r"C:\Projects\InvoiceRails\development\api.invoicerails"), "C--Projects-InvoiceRails-development-api-invoicerails");
         assert_eq!(project_key("/Users/a/p/x/"), "-Users-a-p-x");
+        assert_eq!(project_key(r"C:\"), "C--", "a drive root keeps its separator");
+        assert_eq!(project_key("C:"), "C-");
+        assert_eq!(project_key("/"), "-");
+    }
+
+    #[test]
+    fn the_strong_link_wins_whatever_the_process_order() {
+        // S2 started in C:\Projects and cd'd into pushdocs\api; S1 started in pushdocs\api. S2 is newer.
+        let c = [
+            Candidate { id: "s1".into(), first_cwd: Some(r"C:\Projects\pushdocs\api".into()), cwd: r"C:\Projects\pushdocs\api".into(), project_key: Some("C--Projects-pushdocs-api".into()), modified_ms: 1 },
+            Candidate { id: "s2".into(), first_cwd: Some(r"C:\Projects\pushdocs\api".into()), cwd: r"C:\Projects\pushdocs\api".into(), project_key: Some("C--Projects".into()), modified_ms: 2 },
+        ];
+        let p1 = proc_(1, r"C:\Projects\pushdocs\api");
+        let p2 = proc_(2, r"C:\Projects\");
+        let mut got = match_processes(&c, &[p1.clone(), p2.clone()], true);
+        got.sort();
+        assert_eq!(got, vec![("s1".to_string(), 1), ("s2".to_string(), 2)]);
+        let mut got = match_processes(&c, &[p2, p1], true);
+        got.sort();
+        assert_eq!(got, vec![("s1".to_string(), 1), ("s2".to_string(), 2)], "same pairs in the other order");
+    }
+
+    #[test]
+    fn leftovers_pair_on_cwd_in_a_second_pass() {
+        // No transcript folder matches the process; its cwd still does.
+        let c = [cand("a", Some("/p/x"), "/p/x", 1)];
+        let c = [Candidate { project_key: Some("-elsewhere".into()), ..c[0].clone() }];
+        assert_eq!(match_processes(&c, &[proc_(1, "/p/x")], false), vec![("a".to_string(), 1)]);
     }
 
     #[test]
@@ -251,7 +300,8 @@ mod tests {
             key("c", r"C:\Elsewhere", "C--Elsewhere", 3),
         ];
         let procs = [proc_(10, r"C:\Projects\"), proc_(20, r"C:\Projects\")];
-        assert_eq!(match_processes(&c, &procs, true), vec![("a".to_string(), 10), ("b".to_string(), 20)]);
+        // b's cwd is exactly the start directory: it goes first.
+        assert_eq!(match_processes(&c, &procs, true), vec![("b".to_string(), 10), ("a".to_string(), 20)]);
         assert!(match_processes(&c[..1], &[proc_(10, r"C:\Projects\pushdocs")], false).is_empty(), "the key matches the start directory only");
     }
 

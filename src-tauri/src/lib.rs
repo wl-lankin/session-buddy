@@ -266,7 +266,7 @@ fn adopt_running(app: &AppHandle) {
     let mut last = LAST_SCAN.lock().unwrap();
     if *last != Some(result) {
         *last = Some(result);
-        log::line(format!("process scan: {} claude processes, {} adopted", result.0, result.1));
+        log::line(format!("process scan: {} claude processes, {} held", result.0, result.1));
     }
 }
 

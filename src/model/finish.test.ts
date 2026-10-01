@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardWorthy, finishLines, finishTitle, mergeFinish, planFinish, type FinishItem } from "./finish";
+import { cardWorthy, finishLines, finishTitle, mergeFinish, planFinish, playsSound, type FinishItem } from "./finish";
 
 const item = (sessionId: string, project: string, at: number, turnMs: number | null = 61_000): FinishItem => ({ sessionId, project, at, turnMs });
 
@@ -86,5 +86,14 @@ describe("card text", () => {
   it("the first two non-empty lines of the message", () => {
     expect(finishLines("\nAll 312 tests pass.\n\n  Shall I open the PR?\nThird line")).toBe("All 312 tests pass.\nShall I open the PR?");
     expect(finishLines(null)).toBe("");
+  });
+});
+
+describe("playsSound", () => {
+  it("keeps a deferred finish silent so the sound plays once, on the real completion", () => {
+    expect(playsSound({ kind: "finish", busy: true })).toBe(false);
+    expect(playsSound({ kind: "finish", busy: false })).toBe(true);
+    expect(playsSound({ kind: "finish" })).toBe(true);
+    expect(playsSound({ kind: "approval", busy: true })).toBe(true);
   });
 });

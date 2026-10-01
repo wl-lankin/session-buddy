@@ -1,6 +1,7 @@
 // What happens when a session finishes: card, Mochi, flash. Pure, no DOM.
 
 import type { IslandMode, IslandViewName } from "../core/layout";
+import type { Cue } from "../core/types";
 import { fmtDuration } from "./format";
 
 export type FinishStyle = "card" | "animation" | "off";
@@ -59,6 +60,14 @@ export function planFinish(o: {
   // Never cover a waiting card, and leave the greeting / confused views alone.
   const card = !o.anyPending && (o.mode !== "expanded" || o.view === "session" || o.view === "finished");
   return { card, emote: true, jump: true, flash: !card, reveal: !card && o.mode === "strip" };
+}
+
+/**
+ * Whether a cue plays its sound. A Stop that leaves agents or background tasks running
+ * (busy) stays silent: the finish sound plays once, on the real completion.
+ */
+export function playsSound(c: Pick<Cue, "kind" | "busy">): boolean {
+  return !(c.kind === "finish" && c.busy === true);
 }
 
 export function finishTitle(items: FinishItem[]): string {

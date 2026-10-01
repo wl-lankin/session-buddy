@@ -13,7 +13,7 @@ import { State } from "../core/state";
 import type { Cue, CueKind, Snapshot } from "../core/types";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
-import { FINISH_CARD_S, mergeFinish, planFinish, type FinishItem } from "../model/finish";
+import { FINISH_CARD_S, mergeFinish, planFinish, playsSound, type FinishItem } from "../model/finish";
 import { newPlan, planSession } from "../model/plan";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
@@ -353,7 +353,7 @@ export class Island {
   onCues(cues: Cue[]) {
     for (const c of cues) {
       if (c.kind === "context" && !State.settings.contextSound) continue;
-      Sound.play(CUE_SOUNDS[c.kind]);
+      if (playsSound(c)) Sound.play(CUE_SOUNDS[c.kind]);
       if (c.kind === "finish") this.onFinish(c);
       else if (c.kind !== "approval" && State.mode === "strip") this.fsm.reveal();
     }

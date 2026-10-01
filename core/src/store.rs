@@ -6,6 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::adopt::{match_processes, Candidate, ClaudeProcess};
 use crate::steps::{approval_target, clip, project_name, step_label};
 
 pub const MAX_STEPS: usize = 50;
@@ -603,6 +604,34 @@ impl Store {
         self.sessions.len() != before
     }
 
+    /// True while a seeded session waits for a process to claim it.
+    pub fn has_unclaimed_seeds(&self) -> bool {
+        self.sessions.values().any(|s| !s.live && s.pid.is_none())
+    }
+
+    /// Gives seeded sessions the running Claude Code process in their directory
+    /// (see `adopt::match_processes`) and makes them live. Processes some session
+    /// already has are skipped. Returns true when any session was claimed.
+    pub fn adopt(&mut self, procs: &[ClaudeProcess], windows: bool) -> bool {
+        let known: Vec<u32> = self.sessions.values().filter_map(|s| s.pid).collect();
+        let free: Vec<ClaudeProcess> = procs.iter().filter(|p| !known.contains(&p.pid)).cloned().collect();
+        let mut candidates: Vec<Candidate> = self
+            .sessions
+            .values()
+            .filter(|s| !s.live && s.pid.is_none())
+            .map(|s| Candidate { id: s.id.clone(), first_cwd: s.first_cwd.clone(), cwd: s.cwd.clone(), modified_ms: s.last_event_at })
+            .collect();
+        candidates.sort_by(|a, b| a.id.cmp(&b.id));
+        let pairs = match_processes(&candidates, &free, windows);
+        for (id, pid) in &pairs {
+            if let Some(s) = self.sessions.get_mut(id) {
+                s.pid = Some(*pid);
+                s.live = true;
+            }
+        }
+        !pairs.is_empty()
+    }
+
     /// Adds a session found on disk at start-up; never overwrites a live one.
     pub fn seed(&mut self, session: Session) {
         self.sessions.entry(session.id.clone()).or_insert(session);
@@ -1197,6 +1226,35 @@ mod tests {
         st.seed(Session::new("s1", T0));
         st.apply_statusline(&json!({"session_id": "s1"}), T0 + 1);
         assert!(sess(&st).live);
+    }
+
+    #[test]
+    fn running_processes_claim_seeded_sessions_by_directory() {
+        let seeded = |id: &str, cwd: &str, modified: i64| {
+            let mut s = Session::new(id, modified);
+            s.cwd = cwd.into();
+            s.first_cwd = Some(cwd.into());
+            s.last_event_at = modified;
+            s
+        };
+        let mut st = Store::default();
+        st.seed(seeded("old", r"C:\Projects\pushdocs", T0));
+        st.seed(seeded("new", r"C:\Projects\pushdocs", T0 + 5));
+        st.seed(seeded("gone", r"C:\Projectsetchdocs", T0));
+        st.apply_hook(&json!({"hook_event_name": "PreToolUse", "session_id": "live", "cwd": r"C:\Projectsankconnect", "sb_claude_pid": 7}), T0);
+        assert!(st.has_unclaimed_seeds());
+        let procs = [
+            ClaudeProcess { pid: 7, cwd: r"C:\Projects\pushdocs\".into() },
+            ClaudeProcess { pid: 8, cwd: r"c:\projects\PUSHDOCS\".into() },
+        ];
+        assert!(st.adopt(&procs, true));
+        assert_eq!(st.get("new").unwrap().pid, Some(8), "pid 7 already belongs to a live session");
+        assert!(st.get("new").unwrap().live);
+        assert!(!st.get("old").unwrap().live, "one process, one session: the newest transcript wins");
+        assert!(!st.get("gone").unwrap().live, "no process in its directory: stays recent");
+        assert!(!st.adopt(&procs, true), "nothing left to claim");
+        assert!(st.remove_dead(|pid| pid != 8), "a claimed session goes with its process");
+        assert!(st.get("new").is_none());
     }
 
     #[test]

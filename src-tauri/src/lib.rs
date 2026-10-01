@@ -16,7 +16,7 @@ use std::time::Duration;
 use sb_core::hub::Hub;
 use sb_core::store::{Cue, Session};
 use sb_core::usage::Usage;
-use sb_core::{bootstrap, branch, now_ms};
+use sb_core::{adopt, bootstrap, branch, now_ms};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -220,7 +220,21 @@ fn spawn_bootstrap(app: AppHandle) {
         }
         log::line(format!("bootstrap: {count} recent session(s)"));
         mark_dirty();
+        adopt_running(&app);
     });
+}
+
+/// Seeded sessions whose Claude Code process is running (matched by working
+/// directory) become live. Blocking: lists the processes.
+fn adopt_running(app: &AppHandle) {
+    let shared = app.state::<Shared>();
+    if !shared.hub.store.lock().unwrap().has_unclaimed_seeds() {
+        return;
+    }
+    let procs = adopt::claude_processes(&process::list_processes());
+    if shared.hub.store.lock().unwrap().adopt(&procs, cfg!(windows)) {
+        mark_dirty();
+    }
 }
 
 fn spawn_loops(app: AppHandle) {
@@ -233,6 +247,16 @@ fn spawn_loops(app: AppHandle) {
                 let snap = build_snapshot(&emitter.state::<Shared>());
                 let _ = emitter.emit_to(WINDOW_LABEL, "sessions", snap);
             }
+        }
+    });
+    let adopter = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(30));
+        every.tick().await; // the first scan runs right after the bootstrap
+        loop {
+            every.tick().await;
+            let app = adopter.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || adopt_running(&app)).await;
         }
     });
     tauri::async_runtime::spawn(async move {

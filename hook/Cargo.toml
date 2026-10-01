@@ -1,0 +1,23 @@
+[package]
+name = "sb-relay"
+description = "Relays Claude Code hook and status-line events to session-buddy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sb-relay"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+sb-common = { path = "../common" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+] }

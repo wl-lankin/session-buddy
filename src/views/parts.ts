@@ -4,7 +4,7 @@ import { h, clear } from "./dom";
 import { colorForProject } from "../core/layout";
 import type { Session } from "../core/types";
 import { fmtAdded, fmtRemoved, level } from "../model/format";
-import { statusGlyph } from "../model/viewmodel";
+import { sessionTitle, statusGlyph } from "../model/viewmodel";
 
 export function bar(pct: number | null, width = 64): HTMLElement {
   const fill = h("i", { style: `width:${Math.max(0, Math.min(100, pct ?? 0))}%` });
@@ -30,4 +30,14 @@ export function keyed(container: HTMLElement, key: string, build: () => Node[]) 
 /** "+N" in green and "-N" in red as two spans. */
 export function linesChanged(added: number, removed: number): Node[] {
   return [h("span", { class: "ln-add", text: fmtAdded(added) }), document.createTextNode(" "), h("span", { class: "ln-del", text: fmtRemoved(removed) })];
+}
+
+/** Project name (shrinks with an ellipsis) and the branch as its own chip that stays visible. */
+export function sessionName(s: Session, cls = ""): HTMLElement {
+  return h(
+    "span",
+    { class: `sname ${cls}`.trim(), title: sessionTitle(s) },
+    h("span", { class: "sname-project", text: s.project }),
+    s.branch ? h("span", { class: "branch", text: s.branch }) : null,
+  );
 }

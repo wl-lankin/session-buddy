@@ -1,9 +1,9 @@
 // Island geometry. All values are logical pixels. The window is a fixed
-// 720x360 transparent panel; the island is drawn inside it, glued to the top
+// 800x400 transparent panel; the island is drawn inside it, glued to the top
 // edge and horizontally centred.
 
 export type IslandMode = "strip" | "compact" | "expanded";
-export type IslandViewName = "session" | "interaction" | "empty" | "confused" | "greeting";
+export type IslandViewName = "session" | "interaction" | "finished" | "empty" | "confused" | "greeting";
 
 export type BotStateName =
   | "idle" | "working" | "thinking" | "searching" | "approval" | "question"
@@ -11,8 +11,9 @@ export type BotStateName =
 
 export type BotEmoteName = "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed";
 
-export const PANEL_W = 720;
-export const PANEL_H = 360;
+/** Keep in sync with src-tauri/src/island.rs and tauri.conf.json. */
+export const PANEL_W = 800;
+export const PANEL_H = 400;
 
 // The launch greeting animates out of a notch-sized shape (src/mochi/greeting.ts).
 export const NOTCH_W = 184;
@@ -24,14 +25,15 @@ export const STRIP_W = 340;
 export const STRIP_H = 28;
 export const COMPACT_ISLAND_W = 480;
 export const COMPACT_H = 64;
-export const EXPANDED_W = 700;
+export const EXPANDED_W = 760;
 
 export const ROUNDED_CORNER = 14;
 export const EXPANDED_CORNER = 22;
 
 const VIEW_HEIGHTS: Record<IslandViewName, number> = {
-  session: 320,
+  session: 360,
   interaction: 300,
+  finished: 150,
   empty: 140,
   confused: 160,
   greeting: 150,

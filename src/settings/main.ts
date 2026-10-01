@@ -135,6 +135,19 @@ async function main() {
     save();
   });
 
+  const finish = h(
+    "select",
+    {},
+    h("option", { value: "card", text: "Card and animation" }),
+    h("option", { value: "animation", text: "Animation only" }),
+    h("option", { value: "off", text: "Off" }),
+  );
+  finish.value = settings.finishStyle;
+  finish.addEventListener("change", () => {
+    settings.finishStyle = finish.value === "animation" || finish.value === "off" ? finish.value : "card";
+    save();
+  });
+
   const hotkey = h("input", { type: "text", value: settings.hotkey, placeholder: "Ctrl+Alt+Space" });
   hotkey.addEventListener("change", () => {
     settings.hotkey = hotkey.value.trim();
@@ -159,6 +172,7 @@ async function main() {
       h("h2", { text: "Island" }),
       row("Expanded closes after", numberInput(() => settings.autoCloseInterval, (v) => (settings.autoCloseInterval = v), 3, 120), "seconds"),
       row("Card shrinks to the strip after", numberInput(() => settings.compactInterval, (v) => (settings.compactInterval = v), 2, 120), "seconds"),
+      row("When a session finishes", finish, "the sound plays in every mode while sounds are on"),
       row("Screen", screen),
       row("Hotkey", hotkey, "opens the island from anywhere, e.g. Ctrl+Alt+Space"),
     ),

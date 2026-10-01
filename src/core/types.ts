@@ -71,7 +71,12 @@ export interface Usage {
 export interface Snapshot { sessions: Session[]; usage: Usage; now: number }
 
 export type CueKind = "work" | "finish" | "error" | "approval" | "rate" | "context";
-export interface Cue { sessionId: string; kind: CueKind }
+export interface Cue {
+  sessionId: string;
+  kind: CueKind;
+  /** Finish cues: how long the turn took, when its start was seen. */
+  turnMs?: number;
+}
 
 export const EMPTY_SNAPSHOT: Snapshot = {
   sessions: [],

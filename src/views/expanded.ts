@@ -1,5 +1,5 @@
-// Expanded island: session tabs, header with lines / context / model, the
-// account's limits, and three columns of what is happening right now.
+// Expanded island, in blocks: the session tabs on top; below them the session
+// (header, prompt, steps and agents) and, on the right, the account's limits.
 // Every row has a fixed height and lives in normal flow: nothing is absolutely
 // positioned, so lines can never overlap.
 
@@ -7,9 +7,9 @@ import { h } from "./dom";
 import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
 import type { Limit, Session, Usage } from "../core/types";
-import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format";
-import { accountLabel, accountTitle, modelName, recentClass, sessionTitle, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
-import { bar, keyed, linesChanged, statusDot } from "./parts";
+import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens, level } from "../model/format";
+import { accountTitle, modelName, recentClass, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import { bar, keyed, linesChanged, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 const STEP_ROWS = 7;
@@ -49,36 +49,67 @@ function header(s: Session): Node[] {
         { class: "x-ctx" },
         h("span", { class: "lbl", text: "ctx " }),
         bar(pct, 70),
-        h("span", { text: ` ${fmtPct(pct)}% (${fmtTokens(s.stats.contextTokens)}/${fmtTokens(s.stats.contextSize)})` }),
+        h("span", { text: ` ${fmtPct(pct)}%` }),
+        h("span", { class: "x-tokens", text: ` ${fmtTokens(s.stats.contextTokens)}/${fmtTokens(s.stats.contextSize)}` }),
       ),
     );
   }
-  if (s.model) meta.push(h("span", { class: "x-model", text: modelName(s.model) }));
-  return [
-    h("div", { class: "x-title" }, statusDot(s), h("span", { class: "x-name", text: sessionTitle(s) }), h("span", { class: "x-cwd", text: s.cwd })),
-    h("div", { class: "x-meta" }, ...meta),
-  ];
+  return present([
+    h(
+      "div",
+      { class: "x-title" },
+      statusDot(s),
+      sessionName(s, "x-name"),
+      s.model ? h("span", { class: "x-model", text: modelName(s.model) }) : null,
+    ),
+    h("div", { class: "x-cwd", text: s.cwd, title: s.cwd }),
+    meta.length ? h("div", { class: "x-meta" }, ...meta) : null,
+  ]);
 }
 
-function limit(name: string, l: Limit | null, now: number): Node | null {
-  if (!l) return null;
+/** Lets an email address break after "@" and ".", never in the middle of a word. */
+function breakable(text: string): Node[] {
+  return text.split(/(?<=[@.])/).flatMap((part, i) => (i ? [h("wbr"), document.createTextNode(part)] : [document.createTextNode(part)]));
+}
+
+function limit(name: string, l: Limit | null, now: number): Node[] {
+  if (!l) return [];
   const reset = fmtReset(l.resetsAt, now);
-  return h(
-    "span",
-    { class: "x-limit" },
-    h("span", { class: "lbl", text: `${name} ` }),
-    bar(l.usedPct, 56),
-    h("span", { text: ` ${fmtPct(l.usedPct)}%` }),
-    reset ? h("span", { class: "x-reset", text: ` (${reset})` }) : null,
-  );
+  return present([
+    h(
+      "div",
+      { class: "a-limit" },
+      h("span", { class: "a-name", text: name }),
+      bar(l.usedPct, 62),
+      h("span", { class: `a-pct ${level(l.usedPct)}`, text: `${fmtPct(l.usedPct)}%` }),
+    ),
+    reset ? h("div", { class: "a-reset", text: `resets ${reset}` }) : null,
+  ]);
 }
 
-function limitsRow(u: Usage, now: number): Node[] {
+function accountBlock(u: Usage, now: number): Node[] {
+  const out: Node[] = [h("div", { class: "x-h", text: "LIMITS" })];
   if (!u.fiveHour && !u.sevenDay) {
-    return [h("span", { class: "x-reset", text: u.error ? `Limits unavailable: ${u.error}` : "Limits n/a" })];
+    out.push(h("div", { class: "a-na", text: u.error ? "Limits unavailable" : "Limits n/a" }));
+    if (u.error) out.push(h("div", { class: "a-error", text: u.error, title: u.error }));
+  } else {
+    out.push(...limit("5H", u.fiveHour, now), ...limit("7D", u.sevenDay, now));
+    if (u.error) {
+      const ago = u.updatedAt ? `updated ${fmtAgo(now - u.updatedAt)}` : "not updated";
+      out.push(h("div", { class: "a-error", text: ago, title: u.error }));
+    }
   }
-  const stale = u.error && u.updatedAt ? h("span", { class: "x-reset", text: ` updated ${fmtAgo(now - u.updatedAt)}` }) : null;
-  return present([limit("5H", u.fiveHour, now), limit("7D", u.sevenDay, now), h("span", { class: "x-account", text: accountLabel(u), title: accountTitle(u) }), stale]);
+  const a = u.account;
+  if (a?.email || a?.plan) {
+    out.push(
+      h(
+        "div",
+        { class: "a-account", title: accountTitle(u) },
+        ...present([a.email ? h("div", { class: "a-email" }, ...breakable(a.email)) : null, a.plan ? h("div", { class: "a-plan", text: a.plan }) : null]),
+      ),
+    );
+  }
+  return out;
 }
 
 function stepsCol(s: Session): Node[] {
@@ -148,11 +179,17 @@ function sideCol(s: Session, now: number): Node[] {
 export function buildSessionView(actions: ViewActions): ViewHost {
   const tabsEl = h("div", { class: "x-tabs" });
   const headEl = h("div", { class: "x-head" });
-  const limitsEl = h("div", { class: "x-limits" });
   const promptEl = h("div", { class: "x-prompt" });
   const stepsEl = h("div", { class: "x-col x-steps" });
   const sideEl = h("div", { class: "x-col x-side" });
-  const el = h("div", { class: "view session-view" }, tabsEl, headEl, limitsEl, promptEl, h("div", { class: "x-body" }, stepsEl, sideEl));
+  const accountEl = h("div", { class: "blk x-account" });
+  const sessionEl = h("div", { class: "blk x-session" }, headEl, promptEl, h("div", { class: "x-divider" }), h("div", { class: "x-body" }, stepsEl, sideEl));
+  const el = h(
+    "div",
+    { class: "view session-view" },
+    h("div", { class: "blk x-tabs-blk" }, tabsEl),
+    h("div", { class: "x-main" }, sessionEl, accountEl),
+  );
 
   return {
     el,
@@ -161,17 +198,19 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       const s = State.focus;
       const now = Date.now();
       const minute = Math.floor(now / 60_000);
-      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}`).join("|")}#${s?.id ?? ""}`, () => tabs(actions, all, s?.id ?? null));
-      keyed(limitsEl, JSON.stringify([State.snapshot.usage, minute]), () => limitsRow(State.snapshot.usage, now));
+      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}`).join("|")}#${s?.id ?? ""}`, () => tabs(actions, all, s?.id ?? null));
+      keyed(accountEl, JSON.stringify([State.snapshot.usage, minute]), () => accountBlock(State.snapshot.usage, now));
       if (!s) {
-        keyed(headEl, "none", () => [h("div", { class: "x-title", text: "No sessions" })]);
-        promptEl.textContent = "";
+        keyed(headEl, "none", () => [h("div", { class: "x-title" }, h("span", { class: "x-name", text: "No sessions" }))]);
+        keyed(promptEl, "", () => []);
         keyed(stepsEl, "none", () => []);
         keyed(sideEl, "none", () => []);
         return;
       }
-      keyed(headEl, JSON.stringify([s.id, s.status, s.branch, s.cwd, s.stats, s.model]), () => header(s));
-      promptEl.textContent = s.lastPrompt ? `Prompt: ${firstLine(s.lastPrompt, 140)}` : "";
+      keyed(headEl, JSON.stringify([s.id, s.status, s.project, s.branch, s.cwd, s.stats, s.model]), () => header(s));
+      const prompt = s.lastPrompt ? firstLine(s.lastPrompt, 160) : "";
+      keyed(promptEl, prompt, () => (prompt ? [h("span", { class: "lbl", text: "Prompt " }), document.createTextNode(prompt)] : []));
+      promptEl.title = s.lastPrompt ?? "";
       keyed(stepsEl, JSON.stringify([s.id, s.status, s.steps.slice(-STEP_ROWS)]), () => stepsCol(s));
       keyed(sideEl, JSON.stringify([s.id, s.agents, s.background, minute]), () => sideCol(s, now));
     },

@@ -2,7 +2,7 @@
 // Forked from Coucou's island.ts. File drop, chat and integration pills are gone,
 // and the island never hides: it rests as a strip.
 
-import { Tracked, Spring, clamp } from "../core/anim";
+import { Ease, Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI } from "../core/bridge";
 import {
   EXPANDED_CORNER, GREETING_W, PANEL_W, ROUNDED_CORNER, STRIP_H, STRIP_W, botGlowColor, botGlowOpacity, botPosition,
@@ -13,6 +13,7 @@ import { State } from "../core/state";
 import type { Cue, CueKind, Snapshot } from "../core/types";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
+import { FINISH_CARD_S, mergeFinish, planFinish, type FinishItem } from "../model/finish";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
@@ -101,6 +102,11 @@ export class Island {
         Sound.play("blip");
         State.notify();
         this.animateGeometry(false);
+      },
+      openSession: (id) => {
+        State.focusId = id;
+        Sound.play("blip");
+        this.setView("session");
       },
       cycle: (dir) => this.cycleFocus(dir),
       expand: () => this.fsm.forceHome(),
@@ -200,8 +206,14 @@ export class Island {
     State.notify();
   }
 
+  /** The finished card closes sooner than the other views. */
+  private closeDelay(): number {
+    return State.view === "finished" ? FINISH_CARD_S : State.settings.autoCloseInterval;
+  }
+
   private expand(view: IslandViewName) {
     State.view = view;
+    this.fsm.homeToPetitDelay = this.closeDelay();
     if (State.mode !== "expanded") this.setMode("expanded");
     else this.animateGeometry(false);
     State.lastActivity = performance.now();
@@ -218,6 +230,7 @@ export class Island {
       return;
     }
     State.view = view;
+    this.fsm.homeToPetitDelay = this.closeDelay();
     State.lastActivity = performance.now();
     this.animateGeometry(false);
     State.notify();
@@ -253,7 +266,7 @@ export class Island {
   private rearmCollapse() {
     if (this.wasInIsland) return;
     this.fsm.mouseLeft();
-    if (this.fsm.state === "home") this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
+    if (this.fsm.state === "home") this.homeCollapseAt = performance.now() + this.closeDelay() * 1000;
   }
 
   private setKeyboard(on: boolean) {
@@ -310,13 +323,44 @@ export class Island {
     for (const c of cues) {
       if (c.kind === "context" && !State.settings.contextSound) continue;
       Sound.play(CUE_SOUNDS[c.kind]);
-      if (c.kind === "finish") {
-        State.flash = { sessionId: c.sessionId, until: performance.now() + FLASH_MS };
-        if (c.sessionId === State.mochiSession?.id) this.engine.triggerEmote("happy");
-      }
-      if (c.kind !== "approval" && State.mode === "strip") this.fsm.reveal();
+      if (c.kind === "finish") this.onFinish(c);
+      else if (c.kind !== "approval" && State.mode === "strip") this.fsm.reveal();
     }
     State.notify();
+  }
+
+  private onFinish(c: Cue) {
+    const plan = planFinish({
+      style: State.settings.finishStyle,
+      mode: State.mode,
+      view: State.view,
+      anyPending: pendingQueue(State.sessions, State.focusId).length > 0,
+    });
+    if (plan.flash) State.flash = { sessionId: c.sessionId, until: performance.now() + FLASH_MS };
+    if (plan.emote) this.celebrate();
+    if (plan.card) {
+      const project = State.snapshot.sessions.find((s) => s.id === c.sessionId)?.project ?? "Session";
+      this.showFinished({ sessionId: c.sessionId, project, turnMs: c.turnMs ?? null, at: Date.now() });
+    }
+    if (plan.reveal) this.fsm.reveal();
+  }
+
+  /** Proud eyes and stars plus a small jump, once per finish. */
+  private celebrate() {
+    this.engine.triggerEmote("proud");
+    this.engine.anim("oy", [[-0.3, 140, Ease.out], [0, 380, Ease.back]]);
+  }
+
+  /** Opens (or extends) the finished card. It never pins: it closes after FINISH_CARD_S unless hovered. */
+  private showFinished(item: FinishItem) {
+    const shown = State.mode === "expanded" && State.view === "finished";
+    State.finished = mergeFinish(State.finished, item, shown);
+    State.focusId = item.sessionId;
+    State.isPinned = false;
+    this.fsm.pinned = false;
+    if (State.mode !== "expanded") this.fsm.forceHome();
+    this.expand("finished");
+    this.rearmCollapse();
   }
 
   private async answer(requestId: string, answer: unknown) {
@@ -450,7 +494,7 @@ export class Island {
       this.wasInIsland = false;
       this.fsm.mouseLeft();
       if (this.fsm.state === "home" && !State.isPinned) {
-        this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
+        this.homeCollapseAt = performance.now() + this.closeDelay() * 1000;
       }
     }
 
@@ -644,7 +688,7 @@ export class Island {
       this.countdown.style.width = "0px";
       return;
     }
-    const windowS = Math.min(10, State.settings.autoCloseInterval * 0.6);
+    const windowS = Math.min(10, this.closeDelay() * 0.6);
     const remaining = (this.homeCollapseAt - nowMs) / 1000;
     this.countdown.style.width = remaining < windowS ? `${Math.max(0, clamp(remaining / windowS, 0, 1) * 160)}px` : "0px";
   }
@@ -676,7 +720,7 @@ export class Island {
   applySettings() {
     Sound.setEnabled(State.settings.soundEnabled);
     Sound.setVolume(State.settings.soundVolume);
-    this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.homeToPetitDelay = this.closeDelay();
     this.fsm.compactToStripDelay = State.settings.compactInterval;
     State.notify();
   }

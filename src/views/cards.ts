@@ -7,9 +7,9 @@ import { h } from "./dom";
 import { State } from "../core/state";
 import type { Interaction, Session } from "../core/types";
 import { fmtCountdown } from "../model/format";
-import { answersFor, pendingQueue, sessionTitle } from "../model/viewmodel";
+import { answersFor, pendingQueue } from "../model/viewmodel";
 import { createSubmitGuard } from "../model/submitguard";
-import { btn, statusDot } from "./parts";
+import { btn, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 const KIND_LABEL: Record<Interaction["kind"], string> = {
@@ -182,7 +182,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       head.replaceChildren(
         ...present([
           statusDot(session),
-          h("span", { class: "i-who", text: sessionTitle(session) }),
+          sessionName(session, "i-who"),
           h("span", { class: "i-kind", text: KIND_LABEL[item.kind] }),
           queue.length > 1 ? h("span", { class: "i-queue", text: `+${queue.length - 1} waiting` }) : null,
         ]),

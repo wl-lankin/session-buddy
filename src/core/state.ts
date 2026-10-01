@@ -3,6 +3,7 @@
 import type { BotStateName, IslandMode, IslandViewName } from "./layout";
 import { EMPTY_SNAPSHOT, type Session, type Snapshot } from "./types";
 import { botStateFor, loudest, orderSessions } from "../model/viewmodel";
+import type { FinishItem, FinishStyle } from "../model/finish";
 
 export interface Settings {
   soundEnabled: boolean;
@@ -15,6 +16,8 @@ export interface Settings {
   autostart: boolean;
   hotkey: string;
   contextSound: boolean;
+  /** What a finishing session does: the card plus Mochi, Mochi only, or just the sound. */
+  finishStyle: FinishStyle;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   hotkey: "Ctrl+Alt+Space",
   contextSound: true,
+  finishStyle: "card",
 };
 
 type Listener = () => void;
@@ -44,6 +48,8 @@ class AppState {
   isPinned = false;
   /** After a session finishes, its last message shows in the compact island until `until`. */
   flash: { sessionId: string; until: number } | null = null;
+  /** What the finished card lists, oldest first. */
+  finished: FinishItem[] = [];
   /** Short message on the interaction card, e.g. when an answer arrived too late. */
   notice: { text: string; until: number } | null = null;
   lastActivity = performance.now();

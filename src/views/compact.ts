@@ -4,8 +4,8 @@ import { h, svg } from "./dom";
 import { ICONS } from "./icons";
 import { State } from "../core/state";
 import { fmtPct, level } from "../model/format";
-import { currentActivity, sessionTitle, statusLine } from "../model/viewmodel";
-import { linesChanged, statusDot } from "./parts";
+import { currentActivity, statusLine } from "../model/viewmodel";
+import { keyed, linesChanged, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 export function buildCompact(actions: ViewActions): ViewHost {
@@ -31,7 +31,7 @@ export function buildCompact(actions: ViewActions): ViewHost {
       const s = State.focus;
       const all = State.sessions;
       if (!s) {
-        title.textContent = "No sessions yet";
+        keyed(title, "none", () => [document.createTextNode("No sessions yet")]);
         lines.replaceChildren();
         ctx.textContent = "";
         pager.style.display = "none";
@@ -39,7 +39,7 @@ export function buildCompact(actions: ViewActions): ViewHost {
         activity.textContent = "";
         return;
       }
-      title.textContent = sessionTitle(s);
+      keyed(title, `${s.id}|${s.project}|${s.branch ?? ""}`, () => [sessionName(s)]);
       lines.replaceChildren(...(s.stats.linesAdded || s.stats.linesRemoved ? linesChanged(s.stats.linesAdded, s.stats.linesRemoved) : []));
       const pct = s.stats.contextUsedPct;
       ctx.textContent = pct == null ? "" : `ctx ${fmtPct(pct)}%`;

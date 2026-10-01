@@ -44,7 +44,7 @@ function renderMochi(size) {
   const cy = size / 2 + R * 0.06;
   const rim = R * 0.055; // dark outline so the tray icon reads on light themes
 
-  // Eyes — same geometry as BotEngine (yaw ±0.37, pitch −0.12)
+  // Eyes - same geometry as BotEngine (yaw ±0.37, pitch −0.12)
   const eyeYaw = 0.37;
   const eyePitch = -0.12;
   const cp = Math.cos(eyePitch);
@@ -192,9 +192,9 @@ const files = {
 };
 for (const [name, data] of Object.entries(files)) {
   writeFileSync(join(OUT, name), data);
-  console.log(`${name} — ${data.length} bytes`);
+  console.log(`${name} - ${data.length} bytes`);
 }
 
 const ico = encodeICO([16, 24, 32, 48, 64, 128, 256].map((size) => ({ size, png: png(size) })));
 writeFileSync(join(OUT, "icon.ico"), ico);
-console.log(`icon.ico — ${ico.length} bytes`);
+console.log(`icon.ico - ${ico.length} bytes`);

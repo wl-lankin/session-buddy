@@ -1,4 +1,4 @@
-// The launch "coucou" — port of GreetingCanvasView.swift.
+// The launch "coucou" - port of GreetingCanvasView.swift.
 // Everything is laid out in the same 640×150 reference space as on macOS.
 
 import { Sound } from "../core/sound";
@@ -504,12 +504,12 @@ export class Greeting {
     );
   }
 
-  /** Mouse entered the island during the greeting — hold it open. */
+  /** Mouse entered the island during the greeting - hold it open. */
   hover() {
     if (this.tc >= T.autoLeave) this.tc = Number.POSITIVE_INFINITY;
   }
 
-  /** Mouse left — collapse from now. */
+  /** Mouse left - collapse from now. */
   interrupt() {
     const t = (performance.now() - this.startMs) / 1000;
     if (!Number.isFinite(this.tc) || this.tc > t) this.tc = t;

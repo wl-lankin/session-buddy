@@ -63,8 +63,8 @@ class SoundEngine {
    * thread and its render quantum alive even with nothing playing, which shows
    * up as a steady trickle of CPU on a machine that is supposed to be idle.
    *
-   * The delay covers the tail of whatever just played — suspending mid-sound
-   * would clip it — and `play()` resumes the context on its own.
+   * The delay covers the tail of whatever just played - suspending mid-sound
+   * would clip it - and `play()` resumes the context on its own.
    */
   idle() {
     if (!this.ctx || this.ctx.state !== "running" || this.idleTimer != null) return;

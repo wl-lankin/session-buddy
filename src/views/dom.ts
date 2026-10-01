@@ -1,4 +1,4 @@
-// Minimal DOM helpers — no framework, as specified.
+// Minimal DOM helpers - no framework, as specified.
 
 type Attrs = Record<string, string | number | boolean | EventListener | undefined>;
 type Child = Node | string | null | undefined | false;

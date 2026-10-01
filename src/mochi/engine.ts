@@ -1,7 +1,7 @@
-// Mochi — direct port of NotchBuddy/Sources/App/BotEngine.swift to Canvas 2D.
+// Mochi - direct port of NotchBuddy/Sources/App/BotEngine.swift to Canvas 2D.
 // Same constants, same tweens, same easings, same particles. The only intentional
 // difference is the `happy`/`wink` eye arc, which follows the prototype
-// (design/prototype/notch-buddy.html, the visual source of truth) — the Swift
+// (design/prototype/notch-buddy.html, the visual source of truth) - the Swift
 // arc angles produce a different shape.
 
 import { Ease, lerp, type EaseFn } from "../core/anim";
@@ -283,7 +283,7 @@ export class BotEngine {
     this.anim("sx", [[1.16, 70, Ease.out], [0.95, 130, Ease.out], [1, 170, Ease.inOut]]);
   }
 
-  /** Mailbox swallow — opens the slot, chews, then closes. */
+  /** Mailbox swallow - opens the slot, chews, then closes. */
   gulp() {
     this.slotHTarget = 0.42;
     setTimeout(() => {
@@ -319,7 +319,7 @@ export class BotEngine {
     this.anim("roll", [[Math.PI * 2 * turns, durationMs, Ease.inOut]], () => { this.roll = 0; });
   }
 
-  /** Peek wave — the "coucou". Timings from BotEngine.greet(). */
+  /** Peek wave - the "coucou". Timings from BotEngine.greet(). */
   greet() {
     const t = now();
     const tok = ++this.greetToken;
@@ -452,7 +452,7 @@ export class BotEngine {
     this.morph = 0;
   }
 
-  /** True while anything is still moving — lets the island stop its RAF loop. */
+  /** True while anything is still moving - lets the island stop its RAF loop. */
   get busy(): boolean {
     return (
       this.tweens.size > 0 ||
@@ -518,7 +518,7 @@ export class BotEngine {
     if (this.state === "sleeping") { ty = 0; tp = -0.14; }
     if (this.state === "dizzy") { ty = Math.sin(t * 9) * 0.25; }
 
-    // Mini bots never follow the mouse — they wander.
+    // Mini bots never follow the mouse - they wander.
     if (this.isMini && !this.cfg.look && !this.cfg.scans && this.state !== "sleeping" && this.state !== "dizzy") {
       if (n > this.miniLookNextTime) {
         this.miniLookTarget = {
@@ -590,7 +590,7 @@ export class BotEngine {
     for (const p of this.particles) p.age += dt;
     this.particles = this.particles.filter((p) => p.age < p.life);
 
-    // Mouth slot spring — ω₀ = 2π/0.25, ζ = 0.6
+    // Mouth slot spring - ω₀ = 2π/0.25, ζ = 0.6
     const omega = (2 * Math.PI) / 0.25;
     const zeta = 0.6;
     const acc = omega * omega * (this.slotHTarget - this.slotH) - 2 * zeta * omega * this.slotHVel;
@@ -712,7 +712,7 @@ export class BotEngine {
 
   private drawBody(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
     if (this.bodyColor) {
-      // Mini bots: flat solid fill — no gradient, no reflection, no highlight
+      // Mini bots: flat solid fill - no gradient, no reflection, no highlight
       x.fillStyle = rgba(this.bodyColor, 1);
       x.fill(body);
       return;
@@ -874,7 +874,7 @@ export class BotEngine {
         }
         break;
       case "cup": {
-        // Flat top, rounded bottom corners (U shape) — used while the box is open
+        // Flat top, rounded bottom corners (U shape) - used while the box is open
         const hh = Math.max(h * this.open, w * 0.3);
         const cr = Math.min(w / 2, hh / 2);
         x.beginPath();
@@ -931,7 +931,7 @@ export class BotEngine {
     x.restore();
   }
 
-  /** Hands sit behind the body — drawn before it, in world coordinates. */
+  /** Hands sit behind the body - drawn before it, in world coordinates. */
   private drawHandsBehind(
     x: CanvasRenderingContext2D,
     R: number, rx: number, ry: number, cx: number, cy: number,

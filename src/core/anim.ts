@@ -21,12 +21,12 @@ export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 export const seg = (t: number, a: number, b: number) => clamp((t - a) / (b - a), 0, 1);
 
-/** cubic-bezier(x1,y1,x2,y2) — used for the 340 ms close curve (.45,0,.2,1). */
+/** cubic-bezier(x1,y1,x2,y2) - used for the 340 ms close curve (.45,0,.2,1). */
 export function cubicBezier(x1: number, y1: number, x2: number, y2: number): EaseFn {
   const cx = (t: number) => ((1 - t) ** 2 * 3 * t * x1) + (3 * (1 - t) * t * t * x2) + t ** 3;
   const cy = (t: number) => ((1 - t) ** 2 * 3 * t * y1) + (3 * (1 - t) * t * t * y2) + t ** 3;
   return (x) => {
-    // Newton-ish bisection on x — 12 iterations is plenty at 60 fps.
+    // Newton-ish bisection on x - 12 iterations is plenty at 60 fps.
     let lo = 0;
     let hi = 1;
     let t = x;
@@ -89,7 +89,7 @@ export class Spring {
 }
 
 /**
- * Value driven either by a spring (growing) or a timed curve (shrinking) —
+ * Value driven either by a spring (growing) or a timed curve (shrinking) -
  * matches IslandContainer: openSpring for grow, closeEase 340 ms for shrink.
  */
 export class Tracked {

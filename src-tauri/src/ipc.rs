@@ -57,12 +57,19 @@ pub fn start(hub: Arc<Hub>) {
             // Private directory first, so no other local user can reach the socket before it is chmod-ed.
             let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
-        let _ = std::fs::remove_file(&path);
-        let listener = match tokio::net::UnixListener::bind(&path) {
-            Ok(l) => l,
-            Err(err) => {
-                log::line(format!("cannot open the relay socket: {err}"));
-                return;
+        // The listener never gives up: retry the bind every second until it works.
+        let mut logged = false;
+        let listener = loop {
+            let _ = std::fs::remove_file(&path);
+            match tokio::net::UnixListener::bind(&path) {
+                Ok(l) => break l,
+                Err(err) => {
+                    if !logged {
+                        log::line(format!("cannot open the relay socket, retrying: {err}"));
+                        logged = true;
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
             }
         };
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));

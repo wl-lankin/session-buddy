@@ -13,6 +13,9 @@ pub const FINISHED_TO_IDLE_MS: i64 = 30_000;
 pub const DEFAULT_STALE_AFTER_MS: i64 = 10 * 60_000;
 pub const DEFAULT_REMOVE_AFTER_MS: i64 = 2 * 60 * 60_000;
 const ENDED_AGENT_KEEP_MS: i64 = 10 * 60_000;
+/// While a tool or an agent is running the session may be silent for long; it still goes
+/// stale eventually (e.g. its terminal tab was closed mid-tool), just not before this.
+const BUSY_STALE_AFTER_MS: i64 = 60 * 60_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -472,11 +475,16 @@ impl Store {
 
     /// Time-based transitions. Returns true when anything changed.
     pub fn tick(&mut self, now: i64) -> bool {
-        let stale = self.stale_after_ms;
+        let base = self.stale_after_ms;
         let remove = self.remove_after_ms;
+        // A long tool or a running agent sends no events while it works: allow a longer silence.
+        let stale_after = |s: &Session| {
+            let busy = s.steps.back().is_some_and(|x| x.ok.is_none()) || s.agents.iter().any(|a| a.running);
+            if busy { base.max(BUSY_STALE_AFTER_MS) } else { base }
+        };
         let mut changed = false;
         self.sessions.retain(|_, s| {
-            let keep = !(s.status == Status::Stale && now - s.last_event_at >= stale + remove);
+            let keep = !(s.status == Status::Stale && now - s.last_event_at >= stale_after(s) + remove);
             changed |= !keep;
             keep
         });
@@ -485,9 +493,7 @@ impl Store {
                 s.set_status(Status::Idle, now);
                 changed = true;
             }
-            // A long tool or a running agent sends no events while it works: not stale.
-            let busy = s.steps.back().is_some_and(|x| x.ok.is_none()) || s.agents.iter().any(|a| a.running);
-            if s.pending.is_empty() && !busy && s.status != Status::Stale && now - s.last_event_at >= stale {
+            if s.pending.is_empty() && s.status != Status::Stale && now - s.last_event_at >= stale_after(s) {
                 s.set_status(Status::Stale, now);
                 changed = true;
             }
@@ -678,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn running_tool_or_agent_never_goes_stale() {
+    fn running_tool_or_agent_delays_stale() {
         let mut st = Store::default();
         st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "cargo build"}})), T0);
         st.tick(T0 + DEFAULT_STALE_AFTER_MS * 2);
@@ -690,6 +696,20 @@ mod tests {
         st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a1"})), T0 + 3);
         st.tick(T0 + 3 + DEFAULT_STALE_AFTER_MS);
         assert_eq!(sess(&st).status, Status::Stale);
+    }
+
+    #[test]
+    fn running_step_goes_stale_after_an_hour_and_is_removed_later() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "sleep 99999"}})), T0);
+        st.tick(T0 + BUSY_STALE_AFTER_MS - 1);
+        assert_eq!(sess(&st).status, Status::Working);
+        assert!(st.tick(T0 + BUSY_STALE_AFTER_MS));
+        assert_eq!(sess(&st).status, Status::Stale, "terminal closed mid-tool: stale after 60 min");
+        st.tick(T0 + BUSY_STALE_AFTER_MS + DEFAULT_REMOVE_AFTER_MS - 1);
+        assert!(st.get("s1").is_some());
+        assert!(st.tick(T0 + BUSY_STALE_AFTER_MS + DEFAULT_REMOVE_AFTER_MS));
+        assert!(st.get("s1").is_none());
     }
 
     #[test]

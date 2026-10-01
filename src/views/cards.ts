@@ -11,6 +11,7 @@ import { answersFor, pendingQueue } from "../model/viewmodel";
 import { createSubmitGuard } from "../model/submitguard";
 import { btn, enlargeButton, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
+import { renderMarkdown } from "./markdown";
 
 const KIND_LABEL: Record<Interaction["kind"], string> = {
   approval: "Permission",
@@ -163,7 +164,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
         send();
       }
     });
-    body.replaceChildren(h("div", { class: "i-message scrollable", text: item.message }), box);
+    // Claude writes Markdown: **bold**, `code`, lists and code blocks read better rendered.
+    body.replaceChildren(h("div", { class: "i-message scrollable" }, ...renderMarkdown(item.message)), box);
     foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), btn("Send", "primary", send));
   }
 

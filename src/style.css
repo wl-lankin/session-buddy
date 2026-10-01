@@ -804,6 +804,11 @@ body {
 .md-code, .md-code-inline { font-family: var(--mono); font-size: 11.5px; color: #e8e9ec; background: rgba(255, 255, 255, 0.06); border-radius: 6px; }
 .md-code-inline { padding: 0 4px; }
 .md-code { margin: 4px 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Claude's message on the reply card: rendered Markdown, a little air between paragraphs. */
+.i-message { white-space: normal; }
+.i-message .md-p { margin: 0 0 5px; }
+.i-message .md-li + .md-p, .i-message .md-code + .md-p { margin-top: 5px; }
+.i-message strong { color: var(--ink); font-weight: 600; }
 
 /* ── Manual size: grip, enlarge button, enlarged layouts ────────────── */
 #grip {

@@ -78,8 +78,8 @@ fn read_tail(path: &Path) -> Option<String> {
     let start = len.saturating_sub(TAIL_BYTES);
     f.seek(SeekFrom::Start(start)).ok()?;
     let mut buf = Vec::new();
-    f.read_to_end(&mut buf).ok()?;
-    let text = String::from_utf8_lossy(&buf).to_string();
+    f.take(TAIL_BYTES).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf).into_owned();
     let mut lines: Vec<&str> = text.lines().collect();
     if start > 0 && !lines.is_empty() {
         lines.remove(0); // first line is cut in the middle
@@ -195,5 +195,40 @@ mod tests {
         assert_eq!(fresh.last_event_at, 1_000);
         let old = session_from_seed(&seed, 1_000 + 11 * 60_000, 10 * 60_000);
         assert_eq!(old.status, Status::Stale);
+    }
+
+    #[test]
+    fn large_transcript_is_read_from_a_bounded_tail() {
+        // Multi-byte padding so the seek offset can land inside a character;
+        // the extra 0..4 filler bytes shift the offset across every alignment.
+        let pad_row = json!({"type":"user","message":{"content":"\u{e4}\u{1f600}".repeat(200)}}).to_string();
+        for shift in 0..4 {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join("proj")).unwrap();
+            let path = dir.path().join("proj").join("big.jsonl");
+            let mut body = String::from("{\"type\":\"user\",\"sessionId\":\"s9\",\"message\":{\"content\":\"EARLY_MARKER\"}}\n");
+            while body.len() < 640 * 1024 {
+                body.push_str(&pad_row);
+                body.push('\n');
+            }
+            body.push_str(&" ".repeat(shift));
+            body.push('\n');
+            body.push_str(&lines(&[
+                json!({"type":"user","sessionId":"s9","cwd":"/p/pushdocs","message":{"content":"the real last prompt"}}),
+                json!({"type":"assistant","sessionId":"s9","message":{"content":[{"type":"text","text":"the real last message"}]}}),
+            ]));
+            std::fs::write(&path, &body).unwrap();
+
+            let tail = read_tail(&path).unwrap();
+            assert!(tail.len() <= TAIL_BYTES as usize + 16, "tail is bounded, got {} bytes", tail.len());
+            assert!(!tail.contains("EARLY_MARKER"), "the start of the file is not read");
+
+            let seeds = scan(dir.path(), crate::now_ms(), 60_000)
+                .into_iter()
+                .collect::<Vec<_>>();
+            assert_eq!(seeds.len(), 1);
+            assert_eq!(seeds[0].last_prompt.as_deref(), Some("the real last prompt"));
+            assert_eq!(seeds[0].last_message.as_deref(), Some("the real last message"));
+        }
     }
 }

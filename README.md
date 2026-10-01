@@ -46,7 +46,7 @@ Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/s
 The builds are not code-signed yet, so the first start needs one extra click:
 
 - **Windows SmartScreen**: "Windows protected your PC" > **More info** > **Run anyway**.
-- **macOS Gatekeeper**: right-click the app > **Open** > **Open** (once). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
+- **macOS Gatekeeper**: open the app once and click **Done**, then System Settings > Privacy & Security > **Open Anyway** (macOS 15 and later no longer offer right-click > Open). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
 
 **Upgrading on Windows from an older "session-buddy" build?** Uninstall the old app first (Settings > Apps), because the install folder name changed. Your hooks and settings stay where they are.
 

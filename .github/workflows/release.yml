@@ -73,7 +73,7 @@ jobs:
         with:
           tagName: ${{ env.TAG }}
           releaseName: "Session Buddy ${{ env.TAG }}"
-          releaseBody: "Unsigned builds. Windows: SmartScreen > More info > Run anyway. macOS: right-click the app > Open once, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`."
+          releaseBody: "Unsigned builds. Windows: SmartScreen > More info > Run anyway. macOS: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`."
           releaseDraft: true
           prerelease: ${{ contains(env.TAG, '-') }}
           args: ${{ matrix.args }}

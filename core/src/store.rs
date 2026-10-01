@@ -49,6 +49,9 @@ pub struct Agent {
     pub current_step: Option<String>,
     pub started_at: i64,
     pub ended_at: Option<i64>,
+    /// The agent's last hook event; an agent silent since an earlier turn is taken as ended.
+    #[serde(skip)]
+    pub last_seen_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -134,6 +137,9 @@ pub struct Session {
     /// The last Stop left agents or background tasks running: their end is the real completion.
     #[serde(skip)]
     pub finish_deferred: bool,
+    /// When the latest turn started with a UserPromptSubmit (typed or wrapped).
+    #[serde(skip)]
+    pub prompt_at: Option<i64>,
     /// The plan Claude Code is asking to approve (ExitPlanMode). Answered only in the terminal.
     pub plan: Option<String>,
 }
@@ -221,6 +227,7 @@ impl Session {
             turn_started_at: None,
             work_started_at: None,
             finish_deferred: false,
+            prompt_at: None,
             plan: None,
         }
     }
@@ -272,6 +279,7 @@ impl Session {
             if let Some(t) = agent_type {
                 self.agents[i].agent_type = t.to_string();
             }
+            self.agents[i].last_seen_at = now;
             return &mut self.agents[i];
         }
         self.agents.push(Agent {
@@ -282,6 +290,7 @@ impl Session {
             current_step: None,
             started_at: now,
             ended_at: None,
+            last_seen_at: now,
         });
         self.agents.last_mut().expect("just pushed")
     }
@@ -295,6 +304,15 @@ impl Session {
             .or(if self.agent_descriptions.is_empty() { None } else { Some(0) })?;
         let (_, d) = self.agent_descriptions.remove(i);
         (!d.is_empty()).then_some(d)
+    }
+
+    /// Agents that never sent their SubagentStop (Esc, crash) would keep the session busy forever.
+    fn end_agents(&mut self, now: i64, ended: impl Fn(&Agent) -> bool) {
+        for a in self.agents.iter_mut().filter(|a| a.running && ended(a)) {
+            a.running = false;
+            a.ended_at = Some(now);
+            a.current_step = None;
+        }
     }
 
     /// Sub-agents or background tasks still running.
@@ -328,14 +346,29 @@ impl Store {
         list
     }
 
+    /// A pid belongs to one session. Any other session holding it (e.g. a seed adopted by a wrong
+    /// guess, or the session a /clear replaced) goes back to recent, unless it waits for the user.
+    fn release_pid(&mut self, owner: &str, pid: u32) {
+        for (id, s) in self.sessions.iter_mut() {
+            if id != owner && s.pid == Some(pid) && s.pending.is_empty() {
+                s.pid = None;
+                s.live = false;
+            }
+        }
+    }
+
     /// Finds or creates the session, marks it live, records the relay's pid and refreshes cwd / terminal.
     /// The project is set from the first cwd only.
     fn touch(&mut self, p: &Value, now: i64) -> Option<&mut Session> {
         let id = s(p, "session_id")?;
+        let pid = p.get("sb_claude_pid").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok());
+        if let Some(pid) = pid {
+            self.release_pid(id, pid);
+        }
         let sess = self.sessions.entry(id.to_string()).or_insert_with(|| Session::new(id, now));
         sess.live = true;
-        if let Some(pid) = p.get("sb_claude_pid").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()) {
-            sess.pid = Some(pid);
+        if pid.is_some() {
+            sess.pid = pid;
         }
         if let Some(cwd) = s(p, "cwd") {
             if sess.cwd != cwd {
@@ -398,7 +431,12 @@ impl Store {
                     // A typed prompt starts new work; a wrapper (an agent's result) continues the old.
                     sess.work_started_at = Some(now);
                     sess.finish_deferred = false;
+                    // An agent silent since the previous turn started is gone.
+                    if let Some(prev) = sess.prompt_at {
+                        sess.end_agents(now, |a| a.last_seen_at < prev);
+                    }
                 }
+                sess.prompt_at = Some(now);
                 sess.turn_started_at = Some(now);
                 sess.plan = None;
                 sess.set_status(Status::Thinking, now);
@@ -483,6 +521,11 @@ impl Store {
                     sess.last_message = Some(clip(m, 2_000));
                 }
                 sess.update_background(p);
+                // The payload lists what still runs: a running agent missing from it has ended.
+                if let Some(list) = p.get("background_tasks").and_then(Value::as_array) {
+                    let ids: Vec<&str> = list.iter().filter_map(|t| s(t, "id")).collect();
+                    sess.end_agents(now, |a| !ids.contains(&a.id.as_str()));
+                }
                 match request_id {
                     Some(request_id) => {
                         let message = sess.last_message.clone().unwrap_or_default();
@@ -1338,8 +1381,8 @@ mod tests {
         let mut st = Store::default();
         st.seed(seeded("old", r"C:\Projects\pushdocs", T0));
         st.seed(seeded("new", r"C:\Projects\pushdocs", T0 + 5));
-        st.seed(seeded("gone", r"C:\Projectsetchdocs", T0));
-        st.apply_hook(&json!({"hook_event_name": "PreToolUse", "session_id": "live", "cwd": r"C:\Projectsankconnect", "sb_claude_pid": 7}), T0);
+        st.seed(seeded("gone", r"C:\Projects\fetchdocs", T0));
+        st.apply_hook(&json!({"hook_event_name": "PreToolUse", "session_id": "live", "cwd": r"C:\Projects\bankconnect", "sb_claude_pid": 7}), T0);
         assert!(st.has_unclaimed_seeds());
         let procs = [
             ClaudeProcess { pid: 7, cwd: r"C:\Projects\pushdocs\".into() },
@@ -1401,5 +1444,87 @@ mod tests {
         assert_eq!(got.last_event_at, later);
         assert!(!st.tick(later + 1), "the stale timer starts again from the adoption");
         assert_eq!(st.get("s1").unwrap().status, Status::Idle);
+    }
+
+    #[test]
+    fn a_pid_belongs_to_one_session_only() {
+        let mut st = Store::default();
+        let mut y = Session::new("y", T0);
+        y.cwd = "/p/x".into();
+        y.first_cwd = Some("/p/x".into());
+        st.seed(y);
+        assert!(st.adopt(&[ClaudeProcess { pid: 42, cwd: "/p/x".into() }], false, T0 + 1));
+        assert!(st.get("y").unwrap().live, "the guess");
+        st.apply_hook(&json!({"hook_event_name": "UserPromptSubmit", "session_id": "x", "cwd": "/p/x", "prompt": "go", "sb_claude_pid": 42}), T0 + 2);
+        let y = st.get("y").unwrap();
+        assert!(!y.live, "the wrong guess goes back to recent");
+        assert_eq!(y.pid, None);
+        assert!(st.get("x").unwrap().live);
+        assert_eq!(st.get("x").unwrap().pid, Some(42));
+        assert_eq!(st.snapshot().iter().filter(|s| s.live).count(), 1, "only x is live");
+        // The status line claims a pid the same way.
+        st.apply_statusline(&json!({"session_id": "z", "sb_claude_pid": 42}), T0 + 3);
+        assert_eq!(st.get("x").unwrap().pid, None);
+        assert!(!st.get("x").unwrap().live);
+    }
+
+    #[test]
+    fn a_session_waiting_for_the_user_keeps_its_pid() {
+        let mut st = Store::default();
+        st.apply_hook(&json!({"hook_event_name": "UserPromptSubmit", "session_id": "w", "cwd": "/p/x", "prompt": "go", "sb_claude_pid": 5}), T0);
+        st.apply_hook(
+            &json!({"hook_event_name": "PermissionRequest", "session_id": "w", "tool_name": "Bash", "sb_request_id": "r1", "sb_wait_ms": 1000}),
+            T0 + 1,
+        );
+        st.apply_hook(&json!({"hook_event_name": "UserPromptSubmit", "session_id": "x", "cwd": "/p/x", "prompt": "go", "sb_claude_pid": 5}), T0 + 2);
+        assert_eq!(st.get("w").unwrap().pid, Some(5));
+        assert!(st.get("w").unwrap().live);
+    }
+
+    #[test]
+    fn a_stuck_agent_from_an_earlier_turn_does_not_block_the_finish_card() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "first"})), T0);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a1", "agent_type": "Explore"})), T0 + 1_000);
+        // Esc: no SubagentStop ever arrives for a1.
+        assert!(st.apply_hook(&ev("Stop", json!({})), T0 + 5_000)[0].busy);
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "second"})), T0 + 60_000);
+        assert!(sess(&st).agents[0].running, "it spoke during the turn that just ended");
+        assert!(st.apply_hook(&ev("Stop", json!({})), T0 + 65_000)[0].busy);
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "third"})), T0 + 120_000);
+        assert!(!sess(&st).agents[0].running, "silent since the previous turn started");
+        assert_eq!(sess(&st).agents[0].ended_at, Some(T0 + 120_000));
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 260_000);
+        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Finish, turn_ms: Some(140_000), busy: false }]);
+    }
+
+    #[test]
+    fn an_agent_that_spoke_this_turn_keeps_running_over_a_new_prompt() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "first"})), T0);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a1"})), T0 + 1_000);
+        st.apply_hook(&ev("PreToolUse", json!({"agent_id": "a1", "tool_name": "Read"})), T0 + 2_000);
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "second"})), T0 + 3_000);
+        assert!(sess(&st).agents[0].running);
+    }
+
+    #[test]
+    fn stop_ends_agents_missing_from_its_background_tasks() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "gone"})), T0 + 1);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "bg"})), T0 + 2);
+        let running = json!([{"id": "bg", "type": "subagent", "status": "running", "description": "d"}]);
+        st.apply_hook(&ev("Stop", json!({"background_tasks": running})), T0 + 90_000);
+        fn agent(st: &Store, id: &str) -> Agent {
+            sess(st).agents.iter().find(|a| a.id == id).unwrap().clone()
+        }
+        assert!(!agent(&st, "gone").running);
+        assert_eq!(agent(&st, "gone").ended_at, Some(T0 + 90_000));
+        assert!(agent(&st, "bg").running, "listed: still running");
+        // Without the field nothing is ended.
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "<agent-message>x</agent-message>"})), T0 + 90_001);
+        st.apply_hook(&ev("Stop", json!({})), T0 + 90_002);
+        assert!(agent(&st, "bg").running);
     }
 }

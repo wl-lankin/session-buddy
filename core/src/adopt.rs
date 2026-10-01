@@ -43,6 +43,11 @@ fn stem(exe: &str) -> &str {
 
 /// claude itself, or node running Claude Code (its command line names claude).
 pub fn is_claude_process(exe: &str, command_line: Option<&str>) -> bool {
+    // The Claude desktop app is also "claude": its Windows (Squirrel or Store) and macOS bundle paths give it away.
+    let lower = exe.to_ascii_lowercase();
+    if ["anthropicclaude", "windowsapps", ".app/contents/macos"].iter().any(|m| lower.contains(m)) {
+        return false;
+    }
     let stem = stem(exe);
     if stem.eq_ignore_ascii_case("claude") {
         return true;
@@ -120,6 +125,14 @@ mod tests {
         assert!(!is_claude_process("node.exe", None), "an unreadable command line is not proof");
         assert!(!is_claude_process("claude-helper.exe", None));
         assert!(!is_claude_process("bash.exe", Some("bash -c claude")));
+    }
+
+    #[test]
+    fn the_claude_desktop_app_is_not_claude_code() {
+        assert!(!is_claude_process(r"C:\Users\a\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe", None));
+        assert!(!is_claude_process(r"C:\Program Files\WindowsApps\Claude_1.2.3.0_x64__abc\app\Claude.exe", None));
+        assert!(!is_claude_process("/Applications/Claude.app/Contents/MacOS/Claude", None));
+        assert!(is_claude_process("/Users/a/.local/bin/claude", None), "the CLI still counts");
     }
 
     #[test]

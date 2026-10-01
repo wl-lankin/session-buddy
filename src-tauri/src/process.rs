@@ -64,9 +64,13 @@ pub fn list_processes() -> Vec<RawProcess> {
     }
     let me = sb_common::user_key();
     for p in out.iter_mut().filter(|p| win_peb::worth_reading(&p.exe)) {
-        if let Some((cmd, cwd)) = win_peb::command_line_and_cwd(p.pid, &me) {
-            p.command_line = cmd;
-            p.cwd = cwd;
+        if let Some(read) = win_peb::read_process(p.pid, &me) {
+            p.command_line = read.command_line;
+            p.cwd = read.cwd;
+            // The full image path tells the Claude desktop app (also claude.exe) from Claude Code.
+            if let Some(image) = read.image {
+                p.exe = image;
+            }
         }
     }
     out
@@ -81,8 +85,8 @@ mod win_peb {
     use windows::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
     use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
     use windows::Win32::System::Threading::{
-        IsWow64Process, OpenProcess, OpenProcessToken, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_INFORMATION,
-        PROCESS_VM_READ,
+        IsWow64Process, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_BASIC_INFORMATION,
+        PROCESS_NAME_WIN32, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
     };
 
     // x64 layout: PEB.ProcessParameters, and in RTL_USER_PROCESS_PARAMETERS the
@@ -97,14 +101,33 @@ mod win_peb {
         sb_core::adopt::is_claude_process(exe, Some("claude"))
     }
 
-    /// (command line, working directory) of a process of the user `me`; None for other users.
-    pub fn command_line_and_cwd(pid: u32, me: &str) -> Option<(Option<String>, Option<String>)> {
+    pub struct Read {
+        pub command_line: Option<String>,
+        pub cwd: Option<String>,
+        pub image: Option<String>,
+    }
+
+    /// Command line, working directory and full image path of a process of the user `me`; None for other users.
+    pub fn read_process(pid: u32, me: &str) -> Option<Read> {
         // SAFETY: the handle is closed on every path below.
         let process = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid) }.ok()?;
-        let result = if user_sid(process).as_deref() == Some(me) { read_params(process) } else { None };
+        let result = if user_sid(process).as_deref() == Some(me) {
+            let (command_line, cwd) = read_params(process).unwrap_or((None, None));
+            Some(Read { command_line, cwd, image: image_path(process) })
+        } else {
+            None
+        };
         // SAFETY: opened above, closed once.
         let _ = unsafe { CloseHandle(process) };
         result
+    }
+
+    fn image_path(process: HANDLE) -> Option<String> {
+        let mut buf = vec![0u16; 1024];
+        let mut len = buf.len() as u32;
+        // SAFETY: `len` is the buffer size in characters; on success it holds the length written.
+        unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len) }.ok()?;
+        Some(String::from_utf16_lossy(&buf[..(len as usize).min(buf.len())]))
     }
 
     fn read_params(process: HANDLE) -> Option<(Option<String>, Option<String>)> {
@@ -174,7 +197,8 @@ mod win_peb {
                 let _ = CloseHandle(token);
                 return None;
             }
-            let mut buf = vec![0u8; needed as usize];
+            // u64 words keep the buffer aligned for TOKEN_USER (a pointer-sized SID_AND_ATTRIBUTES).
+            let mut buf = vec![0u64; (needed as usize).div_ceil(std::mem::size_of::<u64>())];
             let ok = GetTokenInformation(token, TokenUser, Some(buf.as_mut_ptr().cast()), needed, &mut needed).is_ok();
             let _ = CloseHandle(token);
             if !ok {
@@ -220,8 +244,9 @@ pub fn list_processes() -> Vec<RawProcess> {
         // SAFETY: pbi_comm is NUL-terminated within its array.
         let comm = unsafe { CStr::from_ptr(info.pbi_comm.as_ptr()) }.to_string_lossy().into_owned();
         // The native installer's binary is named after its version: match it by its path.
+        // The full path tells the Claude desktop app (/Applications/Claude.app/Contents/MacOS/Claude) from Claude Code.
         let exe = if sb_core::adopt::is_claude_process(&comm, Some("claude")) {
-            comm
+            mac::exe_path(pid).unwrap_or(comm)
         } else {
             match mac::exe_path(pid) {
                 Some(path) if path.contains("/claude") => "claude".to_string(),
@@ -361,7 +386,7 @@ mod tests {
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
         let found = found.expect("the child is listed");
-        assert_eq!(found.exe, "claude.exe");
+        assert!(sb_core::adopt::same_dir(&found.exe, &exe.to_string_lossy(), true), "the full image path: {}", found.exe);
         assert!(found.command_line.as_deref().unwrap_or_default().contains("ping"), "{found:?}");
         let cwd = found.cwd.expect("cwd read from the process parameters");
         assert!(sb_core::adopt::same_dir(&cwd, &dir.to_string_lossy(), true), "{cwd} vs {}", dir.display());

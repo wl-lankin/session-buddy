@@ -34,7 +34,6 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 | ![Plan](docs/media/plan.png) | **Plan.** The plan from plan mode, to read while you choose in the terminal. |
 | ![Finished](docs/media/finished.png) | **Finished.** A session is done: which one, how long it took, what it said. |
 | ![Several finished](docs/media/finished-merged.png) | **Several finished.** Sessions finishing close together share one card. |
-| ![Settings](docs/media/settings.png) | **Settings.** Install into Claude Code, sounds, timing, hotkey, start-up. |
 
 ## Download
 

@@ -1,6 +1,7 @@
-//! The island window: a fixed 960x400 transparent panel at the top centre of
-//! the screen. Outside the island shape it lets clicks through; a 30 Hz cursor
-//! feed drives Mochi's eyes and the hover logic.
+//! The island window: a transparent panel at the top centre of the screen,
+//! 960x400 by default and larger while the island is enlarged or wide. Outside
+//! the island shape it lets clicks through; a 30 Hz cursor feed drives Mochi's
+//! eyes and the hover logic.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,9 +10,22 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 
-/// Keep in sync with src/core/layout.ts and tauri.conf.json.
+/// The default panel. Keep in sync with src/core/layout.ts and tauri.conf.json.
 pub const PANEL_W: f64 = 960.0;
 pub const PANEL_H: f64 = 400.0;
+
+/// The panel size the front end asked for, logical pixels (see `set_panel_size`).
+static PANEL: Mutex<(f64, f64)> = Mutex::new((PANEL_W, PANEL_H));
+
+/// Never smaller than the default panel; non-finite input keeps the default.
+pub fn panel_request(width: f64, height: f64) -> (f64, f64) {
+    let pick = |v: f64, min: f64| if v.is_finite() { v.max(min) } else { min };
+    (pick(width, PANEL_W), pick(height, PANEL_H))
+}
+
+pub fn set_panel(width: f64, height: f64) {
+    *PANEL.lock().unwrap() = panel_request(width, height);
+}
 pub const WINDOW_LABEL: &str = "island";
 
 /// Same margin as the front end (src/island/island.ts HIT_MARGIN).
@@ -65,18 +79,18 @@ fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
     app.primary_monitor().ok().flatten().or_else(|| app.available_monitors().ok()?.into_iter().next())
 }
 
-/// (x, y, width) of the strip the island hangs from, in physical pixels.
+/// (x, y, width, height) of the area the island hangs from, in physical pixels.
 /// macOS keeps windows below the menu bar, so use the work area there.
-fn top_edge(m: &Monitor) -> (i32, i32, u32) {
+fn top_edge(m: &Monitor) -> (i32, i32, u32, u32) {
     #[cfg(target_os = "macos")]
     {
         let wa = m.work_area();
-        (wa.position.x, wa.position.y, wa.size.width)
+        (wa.position.x, wa.position.y, wa.size.width, wa.size.height)
     }
     #[cfg(not(target_os = "macos"))]
     {
         let p = m.position();
-        (p.x, p.y, m.size().width)
+        (p.x, p.y, m.size().width, m.size().height)
     }
 }
 
@@ -84,9 +98,11 @@ pub fn apply_geometry(app: &AppHandle, pref: &str) {
     let Some(win) = window(app) else { return };
     let Some(m) = target_monitor(app, pref) else { return };
     let scale = m.scale_factor();
-    let (x0, y0, width) = top_edge(&m);
-    let pw = (PANEL_W * scale).round() as u32;
-    let ph = (PANEL_H * scale).round() as u32;
+    let (x0, y0, width, height) = top_edge(&m);
+    let (lw, lh) = *PANEL.lock().unwrap();
+    // The panel never reaches past the screen (or the macOS work area).
+    let pw = ((lw * scale).round() as u32).min(width);
+    let ph = ((lh * scale).round() as u32).min(height);
     let x = x0 + (width as i32 - pw as i32) / 2;
     let _ = win.set_size(PhysicalSize::new(pw, ph));
     let _ = win.set_position(PhysicalPosition::new(x, y0));
@@ -213,5 +229,17 @@ mod win32 {
             let want = if activating { ex & !(WS_EX_NOACTIVATE.0 as isize) } else { ex | WS_EX_NOACTIVATE.0 as isize };
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, want);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_panel_is_never_smaller_than_the_default() {
+        assert_eq!(panel_request(1200.0, 700.0), (1200.0, 700.0));
+        assert_eq!(panel_request(300.0, 100.0), (PANEL_W, PANEL_H));
+        assert_eq!(panel_request(f64::NAN, f64::INFINITY), (PANEL_W, PANEL_H));
     }
 }

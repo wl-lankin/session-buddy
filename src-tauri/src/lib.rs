@@ -127,6 +127,22 @@ fn reposition(app: AppHandle, shared: State<Shared>) {
     island::apply_geometry(&app, &pref);
 }
 
+/// Resizes the island window (logical pixels) and re-centres it at the top of its screen.
+#[tauri::command]
+fn set_panel_size(app: AppHandle, shared: State<Shared>, width: f64, height: f64) {
+    island::set_panel(width, height);
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    island::apply_geometry(&app, &pref);
+}
+
+/// Back to the default 960x400 panel.
+#[tauri::command]
+fn reset_panel_size(app: AppHandle, shared: State<Shared>) {
+    island::set_panel(island::PANEL_W, island::PANEL_H);
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    island::apply_geometry(&app, &pref);
+}
+
 #[tauri::command]
 fn ack(shared: State<Shared>, request_id: String) {
     shared.hub.ack(&request_id);
@@ -330,7 +346,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(shared)
         .invoke_handler(tauri::generate_handler![
-            boot, snapshot, save_settings, set_island_rect, focus_window, reposition, ack, answer, release,
+            boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release,
             install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app
         ])
         .setup(move |app| {

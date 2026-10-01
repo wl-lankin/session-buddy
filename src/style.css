@@ -423,8 +423,8 @@ body {
 /* The tab row spans the whole island from its left edge; the blocks below leave room for Buddy. */
 .view.session-view { left: -96px; }
 .session-view .x-main { margin-left: 96px; }
-.x-tabs-blk { flex: 0 0 auto; padding: 4px; }
-.x-tabs { display: flex; gap: 4px; overflow: hidden; height: 22px; }
+.x-tabs-blk { flex: 0 0 auto; padding: 4px; display: flex; align-items: center; gap: 4px; }
+.x-tabs { display: flex; gap: 4px; overflow: hidden; height: 22px; flex: 1 1 auto; min-width: 0; }
 .x-tabs .tab {
   display: inline-flex;
   place-items: normal;
@@ -433,7 +433,7 @@ body {
   min-width: 0;
   align-items: center;
   gap: 5px;
-  max-width: 140px;
+  max-width: none;
   height: 22px;
   padding: 0 9px;
   border: 0;
@@ -444,14 +444,14 @@ body {
   cursor: pointer;
 }
 .x-tabs .tab:not(.on):not(.recent-pill) { min-width: 40px; }
-.x-tabs .tab.on { background: var(--tab-on); color: var(--ink); flex: 0 0 auto; max-width: 200px; }
+.x-tabs .tab.on { background: var(--tab-on); color: var(--ink); flex: 0 0 auto; max-width: 50%; }
 .x-tabs .tab.many:not(.on) { padding: 0 7px; gap: 4px; }
 .x-tabs .tab:hover { color: var(--ink-2); }
 .x-tabs .recent-pill { flex: 0 0 auto; max-width: none; margin-left: auto; padding: 0 8px; font-size: 10.5px; color: var(--dim-3); background: rgba(255, 255, 255, 0.04); }
 .x-tabs .recent-pill.on { background: rgba(255, 255, 255, 0.09); color: var(--dim); }
 .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.x-main { display: grid; grid-template-columns: minmax(0, 1fr) 190px; grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
+.x-main { display: grid; grid-template-columns: minmax(0, 1fr) var(--acct-w, 190px); grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
 
 .x-session { display: flex; flex-direction: column; padding: 9px 12px 8px; min-height: 0; overflow: hidden; }
 .x-head { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
@@ -463,6 +463,44 @@ body {
 .x-tokens { color: var(--dim-4); }
 .lbl { color: var(--dim-3); }
 .x-prompt { flex: 0 0 auto; margin-top: 3px; height: 16px; line-height: 16px; font: 400 11.5px var(--font); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Last answer: one dim line; a click unfolds the whole message below it. */
+.x-answer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  height: 16px;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: 400 11.5px var(--font);
+  color: var(--dim-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.x-answer .lbl { flex: 0 0 auto; white-space: pre; }
+.x-answer-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.x-answer .x-chev { margin-left: 6px; }
+.x-answer:hover .x-answer-text, .x-answer:hover .x-chev, .x-answer.open .x-answer-text { color: var(--ink-2); }
+.x-answer-full {
+  flex: 0 1 auto;
+  min-height: 34px;
+  max-height: 165px; /* ten lines */
+  margin: 5px 0 1px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--block-edge);
+  font: 400 12px/1.375 var(--font);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 .x-divider { flex: 0 0 1px; height: 1px; margin: 7px -12px 4px; background: var(--block-edge); }
 
 .x-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; min-height: 0; flex: 1 1 auto; }
@@ -503,6 +541,8 @@ body {
   color: var(--dim);
 }
 
+.x-name .branch { max-width: none; }
+
 /* Account block: same width for every session. */
 .x-account { display: flex; flex-direction: column; padding: 9px 10px 10px; overflow: hidden; }
 .x-account .x-h { margin: 0 0 4px; }
@@ -535,6 +575,7 @@ body {
 .f-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   padding: 12px 14px 12px 16px;
   border-radius: 14px;
@@ -542,8 +583,8 @@ body {
   cursor: pointer;
 }
 .f-card > * { position: relative; z-index: 1; }
-.f-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.f-title { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; white-space: nowrap; }
+.f-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; }
+.f-title { display: flex; align-items: center; gap: 8px; height: 20px; flex: 0 0 auto; min-width: 0; white-space: nowrap; }
 .f-check {
   display: grid;
   place-items: center;
@@ -556,25 +597,32 @@ body {
   font: 700 11px var(--font);
 }
 .f-text { font: 600 14px var(--font); color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+/* Up to six lines of the last message; the rest scrolls inside the card. */
 .f-message {
-  padding-left: 26px;
+  margin-left: 26px;
+  padding-right: 6px;
   font: 400 12.5px/1.4 var(--font);
   color: var(--ink-2);
   opacity: 0.85;
   white-space: pre-line;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  max-height: 105px; /* 6 x 17.5 */
+  min-height: 0;
+  overflow-y: auto;
+  user-select: text;
 }
-.f-list { display: flex; flex-direction: column; padding-left: 26px; }
+.f-list { display: flex; flex-direction: column; margin-left: 26px; max-height: 114px; /* 6 rows */ min-height: 0; overflow-y: auto; }
+.f-card.single { cursor: pointer; }
+.f-card:not(.single) { cursor: default; }
+.f-row { cursor: pointer; padding-right: 6px; }
+.f-row:hover .f-line { color: var(--ink-2); }
 .f-row { display: flex; align-items: center; gap: 7px; height: 19px; min-width: 0; white-space: nowrap; border-radius: 6px; }
 .f-row:hover .f-project { color: var(--ink); }
 .f-project { font: 600 12px var(--font); color: var(--ink-2); flex: 0 0 auto; }
 .f-time { font: 500 11px var(--mono); color: var(--green-2); flex: 0 0 auto; }
 .f-line { font: 400 12px var(--font); color: var(--dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .f-more { font: 400 11px var(--font); color: var(--dim-4); height: 17px; line-height: 17px; }
-.f-foot { display: flex; align-items: flex-end; }
+.f-foot { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; }
 
 /* ── Interaction cards ───────────────────────────────────────────────── */
 .interaction-view { display: flex; flex-direction: column; gap: 8px; height: 100%; }
@@ -583,6 +631,8 @@ body {
 .i-head .sglyph, .i-kind, .i-queue { flex: 0 0 auto; }
 .i-kind { color: var(--amber); }
 .i-queue { margin-left: auto; color: var(--dim-3); }
+.i-head .enlarge { margin-left: auto; }
+.i-head .i-queue ~ .enlarge { margin-left: 4px; }
 .i-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 1 1 auto; }
 .i-target { flex: 1 1 auto; min-height: 0; max-height: 160px; white-space: pre-wrap; word-break: break-all; }
 .i-questions { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
@@ -661,3 +711,51 @@ body {
 .md-code, .md-code-inline { font-family: var(--mono); font-size: 11.5px; color: #e8e9ec; background: rgba(255, 255, 255, 0.06); border-radius: 6px; }
 .md-code-inline { padding: 0 4px; }
 .md-code { margin: 4px 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ── Manual size: grip, enlarge button, enlarged layouts ────────────── */
+#grip {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 46px;
+  height: 5px;
+  margin-left: -23px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.16);
+  cursor: ns-resize;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-out, background 0.15s ease-out, width 0.15s ease-out, margin 0.15s ease-out;
+  touch-action: none;
+  z-index: 2;
+}
+/* A larger invisible hit area around the pill. */
+#grip::before { content: ""; position: absolute; inset: -6px -10px; }
+#grip.on { opacity: 1; pointer-events: auto; }
+#grip:hover, #island.resizing #grip { background: rgba(255, 255, 255, 0.38); width: 60px; margin-left: -30px; }
+#island.resizing, #island.resizing * { cursor: ns-resize !important; user-select: none; }
+
+.enlarge {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dim-3);
+  font: 600 13px/1 var(--font);
+  cursor: pointer;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
+}
+.enlarge:hover { background: rgba(255, 255, 255, 0.08); color: var(--ink-2); }
+.enlarge.on { color: var(--cyan); }
+.f-foot .enlarge { position: relative; z-index: 1; }
+
+/* Enlarged: the text areas take the extra room instead of leaving it empty. */
+.big .i-target { max-height: none; }
+.big .f-message, .big .f-list { max-height: none; flex: 1 1 auto; }
+.big .x-answer-full { max-height: none; }
+.big .x-body { flex: 1 1 160px; min-height: 120px; }

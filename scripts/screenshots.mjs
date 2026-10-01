@@ -31,6 +31,9 @@ const SHOTS = [
   ["settings", "settings.html?demo=1", 600, 0],
 ];
 
+// The island sizes itself against window.screen (auto width, enlarge): pretend a 1920x1080 display.
+const SCREEN = { screenWidth: 1920, screenHeight: 1080 };
+
 function browser() {
   const candidates =
     process.platform === "win32"
@@ -149,7 +152,7 @@ async function launch(exe) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function shoot(cdp, url, out, w, h, scale) {
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: scale, mobile: false });
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: scale, mobile: false, ...SCREEN });
   // Clear the previous page's flag so the wait below cannot see it.
   await cdp.send("Runtime.evaluate", { expression: "document.body && delete document.body.dataset.ready" });
   await cdp.send("Page.navigate", { url });
@@ -162,7 +165,7 @@ async function shoot(cdp, url, out, w, h, scale) {
   }
   if (h === 0) {
     const r = await cdp.send("Runtime.evaluate", { expression: "document.documentElement.scrollHeight", returnByValue: true });
-    await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: r.result.value, deviceScaleFactor: scale, mobile: false });
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: r.result.value, deviceScaleFactor: scale, mobile: false, ...SCREEN });
     await sleep(200);
   }
   const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });

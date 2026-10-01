@@ -1,6 +1,6 @@
-// Island geometry. All values are logical pixels. The window is a fixed
-// 960x400 transparent panel; the island is drawn inside it, glued to the top
-// edge and horizontally centred.
+// Island geometry. All values are logical pixels. The window is a transparent
+// panel, 960x400 unless the island needs more (src/model/size.ts panelFor); the
+// island is drawn inside it, glued to the top edge and horizontally centred.
 
 export type IslandMode = "strip" | "compact" | "expanded";
 export type IslandViewName = "session" | "interaction" | "plan" | "finished" | "empty" | "confused" | "greeting";
@@ -11,7 +11,7 @@ export type BotStateName =
 
 export type BotEmoteName = "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed";
 
-/** Keep in sync with src-tauri/src/island.rs and tauri.conf.json. */
+/** The default panel. Keep in sync with src-tauri/src/island.rs and tauri.conf.json. */
 export const PANEL_W = 960;
 export const PANEL_H = 400;
 
@@ -33,7 +33,7 @@ export const ROUNDED_CORNER = 14;
 export const EXPANDED_CORNER = 22;
 
 const VIEW_HEIGHTS: Record<IslandViewName, number> = {
-  session: 360,
+  session: 380,
   interaction: 300,
   plan: 300,
   finished: 150,
@@ -42,7 +42,24 @@ const VIEW_HEIGHTS: Record<IslandViewName, number> = {
   greeting: 150,
 };
 
-export function islandSize(mode: IslandMode, view: IslandViewName, interactionHeight?: number, stripWidth?: number): { w: number; h: number } {
+/** The session view without its unfolded last answer. */
+export const VIEW_HEIGHT_SESSION = VIEW_HEIGHTS.session;
+
+/** Views whose height follows their content (ViewHost.measure), within [min, max]. */
+const MEASURED: Partial<Record<IslandViewName, [number, number]>> = {
+  session: [VIEW_HEIGHTS.session, 600],
+  interaction: [200, PANEL_H],
+  finished: [VIEW_HEIGHTS.finished, PANEL_H],
+};
+
+/** Natural island size. `measured` is the view's content height, `expandedWidth` the auto width (src/model/size.ts). */
+export function islandSize(
+  mode: IslandMode,
+  view: IslandViewName,
+  measured?: number,
+  stripWidth?: number,
+  expandedWidth = EXPANDED_W,
+): { w: number; h: number } {
   switch (mode) {
     case "strip":
       return { w: Math.max(STRIP_W, Math.min(STRIP_MAX_W, Math.ceil(stripWidth ?? STRIP_W))), h: STRIP_H };
@@ -50,10 +67,9 @@ export function islandSize(mode: IslandMode, view: IslandViewName, interactionHe
       return { w: COMPACT_ISLAND_W, h: COMPACT_H };
     case "expanded":
       if (view === "greeting") return { w: GREETING_W, h: VIEW_HEIGHTS.greeting };
-      if (view === "interaction" && interactionHeight) {
-        return { w: EXPANDED_W, h: Math.max(200, Math.min(PANEL_H, Math.round(interactionHeight))) };
-      }
-      return { w: EXPANDED_W, h: VIEW_HEIGHTS[view] };
+      const range = MEASURED[view];
+      if (range && measured) return { w: expandedWidth, h: Math.max(range[0], Math.min(range[1], Math.round(measured))) };
+      return { w: expandedWidth, h: VIEW_HEIGHTS[view] };
   }
 }
 

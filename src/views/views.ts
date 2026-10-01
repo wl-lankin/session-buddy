@@ -25,14 +25,20 @@ export interface ViewActions {
   toggleRecent(): void;
   /** View-local state changed (e.g. a folded list): sync the views again. */
   redraw(): void;
+  /** The enlarge button: natural size <-> large reading size. */
+  toggleEnlarge(): void;
 }
 
 export interface ViewHost {
   el: HTMLElement;
   sync(): void;
   tick?(nowMs: number): void;
-  /** Natural size of the content: height for the interaction card, width for the strip. */
+  /** Natural size of the content: island height for the measured views, width for the strip. */
   measure?(): number;
+  /** Island widths the content that must never be truncated needs (session view, see model/size autoWidth). */
+  needs?(): number[];
+  /** The interaction card on screen; enlarging is reset when it changes. */
+  anchorId?(): string | null;
   /** Return true when the key was handled. */
   key?(e: KeyboardEvent): boolean;
 }

@@ -59,6 +59,9 @@ export const Bridge = {
     call<void>("set_island_rect", { x, y, width, height }),
   focusWindow: (focused: boolean) => call<void>("focus_window", { focused }),
   reposition: () => call<void>("reposition"),
+  /** Resizes the island window (logical pixels); Rust re-centres it at the top of its screen. */
+  setPanelSize: (width: number, height: number) => call<void>("set_panel_size", { width, height }),
+  resetPanelSize: () => call<void>("reset_panel_size"),
   ack: (requestId: string) => call<void>("ack", { requestId }),
   /** Resolves to an error message, or null when the answer was delivered. */
   answer: async (requestId: string, answer: unknown): Promise<string | null> => {

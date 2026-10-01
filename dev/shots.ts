@@ -40,6 +40,7 @@ function sessions(): Session[] {
     base("shop", "shop-api", {
       branch: "retry-hooks", status: "working", statusSince: NOW - 3 * MIN - 12_000,
       lastPrompt: "retry failed payment webhooks with backoff",
+      lastMessage: "Retries now back off after 1, 5 and 30 minutes and give up after the third attempt.\nThe webhook test still fails: it needs a fake clock.",
       steps: [
         { tool: "Read", label: "Read · WebhookController.ts", at: NOW - 50_000, ok: true },
         { tool: "Grep", label: "Search · retryPolicy", at: NOW - 40_000, ok: true },

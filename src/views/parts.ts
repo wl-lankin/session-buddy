@@ -6,6 +6,7 @@ import { colorForProject } from "../core/layout";
 import type { Session } from "../core/types";
 import { fmtAdded, fmtRemoved, level } from "../model/format";
 import { sessionTitle, statusGlyph } from "../model/viewmodel";
+import { State } from "../core/state";
 
 export function bar(pct: number | null, width = 64): HTMLElement {
   const fill = h("i", { style: `width:${Math.max(0, Math.min(100, pct ?? 0))}%` });
@@ -46,4 +47,33 @@ export function sessionName(s: Session, cls = ""): HTMLElement {
     h("span", { class: "sname-project", text: s.project }),
     s.branch ? branchChip(s.branch) : null,
   );
+}
+
+/** The enlarge toggle (top right of a card): one per view, refreshed on every sync. */
+export function enlargeButton(onToggle: () => void): { el: HTMLButtonElement; refresh(): void } {
+  const el = h("button", {
+    class: "enlarge",
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      onToggle();
+    },
+  });
+  const refresh = () => {
+    const big = State.manualH != null;
+    const text = big ? "\u2921" : "\u2922";
+    if (el.textContent !== text) el.textContent = text;
+    el.title = big ? "Back to the normal size" : "Enlarge (or drag the grip at the bottom edge)";
+    el.classList.toggle("on", big);
+  };
+  refresh();
+  return { el, refresh };
+}
+
+/** Natural width of a row of shrinking items: what its children take now plus what their ellipsis leaves hide. */
+export function rowNatural(row: HTMLElement, leaves: string): number {
+  const kids = [...row.children] as HTMLElement[];
+  const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+  const taken = kids.reduce((sum, k) => sum + k.offsetWidth, 0) + Math.max(0, kids.length - 1) * gap;
+  const hidden = [...row.querySelectorAll<HTMLElement>(leaves)].reduce((sum, l) => sum + Math.max(0, l.scrollWidth - l.clientWidth), 0);
+  return taken + hidden;
 }

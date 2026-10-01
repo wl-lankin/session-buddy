@@ -5,8 +5,8 @@
 import { Ease, Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI } from "../core/bridge";
 import {
-  EXPANDED_CORNER, GREETING_W, PANEL_W, ROUNDED_CORNER, STRIP_H, STRIP_W, botGlowColor, botGlowOpacity, botPosition,
-  colorForProject, islandSize, type IslandMode, type IslandViewName,
+  EXPANDED_CORNER, EXPANDED_W, GREETING_W, PANEL_H, PANEL_W, ROUNDED_CORNER, STRIP_H, STRIP_W, botGlowColor, botGlowOpacity,
+  botPosition, colorForProject, islandSize, type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
@@ -15,6 +15,7 @@ import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
 import { FINISH_CARD_S, mergeFinish, planFinish, playsSound, type FinishItem } from "../model/finish";
 import { newPlan, planSession } from "../model/plan";
+import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
@@ -34,6 +35,17 @@ const CUE_SOUNDS: Record<CueKind, string> = {
 
 const modeOrder = (m: IslandMode) => (m === "strip" ? 0 : m === "compact" ? 1 : 2);
 
+/** Views whose height follows their content (ViewHost.measure). */
+const MEASURED_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
+/** Views the grip and the enlarge button can make taller. */
+const SIZABLE_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
+
+/** The screen the island is on, logical pixels. */
+function screenSize(): Screen {
+  const s = typeof window !== "undefined" ? window.screen : undefined;
+  return { w: s?.width || 1920, h: s?.height || 1080 };
+}
+
 export class Island {
   readonly fsm = new IslandStateMachine();
 
@@ -45,6 +57,7 @@ export class Island {
   private botGlow!: HTMLElement;
   private greetingCanvas!: HTMLCanvasElement;
   private countdown!: HTMLElement;
+  private grip!: HTMLElement;
 
   private strip!: ViewHost;
   private compact!: ViewHost;
@@ -82,6 +95,16 @@ export class Island {
   private stripW = STRIP_W;
   private lastWheel = 0;
   private keyboard = false;
+
+  /** Expanded width from the session view's untruncatable rows (model/size autoWidth). */
+  private autoW = EXPANDED_W;
+  /** The OS window size last asked for (logical pixels). */
+  private panel = { w: PANEL_W, h: PANEL_H };
+  /** What the manual size belongs to; it resets when that changes. */
+  private sizeAnchor: SizeAnchor & { view: IslandViewName } = { focusId: null, requestId: null, view: "session" };
+  private lastPointerAt = performance.now();
+  /** A grip drag in progress. */
+  private drag: { pointerId: number; startY: number; startH: number } | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -124,6 +147,7 @@ export class Island {
       wantKeyboard: (on) => this.setKeyboard(on),
       relayout: () => this.animateGeometry(false),
       redraw: () => State.notify(),
+      toggleEnlarge: () => this.toggleEnlarge(),
       toggleRecent: () => {
         State.showRecent = !State.showRecent;
         Sound.play("blip");
@@ -138,6 +162,7 @@ export class Island {
     this.botCanvas = h("canvas", { id: "bot-canvas" });
     this.greetingCanvas = h("canvas", { id: "greeting-canvas" });
     this.countdown = h("div", { id: "countdown" });
+    this.grip = h("div", { id: "grip", title: "Drag to resize, double-click for the normal size" });
 
     this.strip = buildStrip();
     this.compact = buildCompact(actions);
@@ -147,7 +172,7 @@ export class Island {
     this.contentEl = h("div", { id: "content" }, viewsEl);
 
     this.clipEl = h("div", { id: "island-clip" }, this.greetingCanvas, this.strip.el, this.compact.el, this.contentEl);
-    this.islandEl = h("div", { id: "island" }, this.clipEl, this.botGlow, this.botCanvas, this.countdown);
+    this.islandEl = h("div", { id: "island" }, this.clipEl, this.botGlow, this.botCanvas, this.countdown, this.grip);
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.greetingCanvas.width = Math.round(GREETING_W * dpr);
@@ -209,6 +234,8 @@ export class Island {
     if (mode === "expanded") Sound.play("open");
     if (prev === "expanded") {
       Sound.play("close");
+      this.resetSize();
+      State.answerOpenFor = null;
       State.showRecent = false;
       State.isPinned = false;
       this.fsm.pinned = false;
@@ -419,23 +446,163 @@ export class Island {
 
   // -- Geometry -------------------------------------------------------------
 
-  private targetSize(): { w: number; h: number; r: number } {
-    const { w, h } = islandSize(State.mode, State.view, this.views.get("interaction")?.measure?.(), this.stripW);
-    return { w, h, r: State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER };
+  /** The island without a manual size. */
+  private naturalSize(): { w: number; h: number } {
+    const measured = MEASURED_VIEWS.includes(State.view) ? this.views.get(State.view)?.measure?.() : undefined;
+    return islandSize(State.mode, State.view, measured, this.stripW, this.autoW);
   }
 
-  private animateGeometry(shrinking: boolean) {
-    const { w, h, r } = this.targetSize();
-    if (shrinking) {
-      this.width.curveTowards(w);
-      this.height.curveTowards(h);
-      this.radius.curveTowards(r);
-    } else {
-      this.width.springTo(w);
-      this.height.springTo(h);
-      this.radius.springTo(r);
+  private sizable(): boolean {
+    return State.mode === "expanded" && SIZABLE_VIEWS.includes(State.view);
+  }
+
+  private targetSize(): { w: number; h: number; r: number } {
+    const natural = this.naturalSize();
+    const h = this.sizable() && State.manualH != null ? clampHeight(State.manualH, natural.h, screenSize()) : natural.h;
+    return { w: natural.w, h, r: State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER };
+  }
+
+  // -- Manual size ----------------------------------------------------------
+
+  private currentAnchor(): SizeAnchor & { view: IslandViewName } {
+    const requestId = State.view === "interaction" ? (this.views.get("interaction")?.anchorId?.() ?? null) : null;
+    return { focusId: State.focus?.id ?? null, requestId, view: State.view };
+  }
+
+  private setManualHeight(h: number | null) {
+    if (h != null && State.manualH == null) this.sizeAnchor = this.currentAnchor();
+    State.manualH = h;
+    this.lastPointerAt = performance.now();
+  }
+
+  /** The enlarge button: natural size <-> large reading size. */
+  private toggleEnlarge() {
+    Sound.play("blip");
+    if (State.manualH != null) {
+      this.resetSize();
+      return;
     }
+    this.setManualHeight(largeHeight(this.naturalSize().h, screenSize()));
+    this.animateGeometry(false);
+    State.notify();
+  }
+
+  /** Back to the natural size (double-click on the grip, or an automatic reset). */
+  private resetSize() {
+    if (State.manualH == null && !this.drag) return;
+    State.manualH = null;
+    this.endDrag();
+    this.animateGeometry(true);
+    State.notify();
+  }
+
+  /** Automatic reset: the card was answered, the focus moved, the island closed, or two idle minutes. */
+  private checkSizeReset(nowMs: number) {
+    if (State.manualH == null || this.drag) return;
+    const now = this.currentAnchor();
+    const reset = shouldResetSize({
+      anchor: this.sizeAnchor,
+      now,
+      expanded: State.mode === "expanded",
+      lastPointerAt: this.lastPointerAt,
+      nowMs,
+    }) || now.view !== this.sizeAnchor.view;
+    if (reset) this.resetSize();
+  }
+
+  private wireGrip() {
+    this.grip.addEventListener("pointerdown", (e) => {
+      if (!this.sizable() || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        this.grip.setPointerCapture(e.pointerId);
+      } catch {
+        // Not an active pointer (synthetic event): the drag still works while the pointer stays on the grip.
+      }
+      this.drag = { pointerId: e.pointerId, startY: e.clientY, startH: this.height.value };
+      this.setManualHeight(Math.round(this.height.value));
+      this.islandEl.classList.add("resizing");
+      // The whole (now tall) window takes the pointer while dragging, so it can move past the island's edge.
+      this.syncPanel();
+      this.ensureRunning();
+    });
+    this.grip.addEventListener("pointermove", (e) => {
+      if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+      this.lastPointerAt = performance.now();
+      const h = clampHeight(this.drag.startH + e.clientY - this.drag.startY, this.naturalSize().h, screenSize());
+      State.manualH = h;
+      this.height.jump(h);
+      this.dirty = true;
+      this.ensureRunning();
+    });
+    const end = (e: PointerEvent) => {
+      if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+      this.endDrag();
+      // Dragged back to (or above) the natural height: that is the natural size again.
+      if (State.manualH != null && State.manualH <= this.naturalSize().h) State.manualH = null;
+      this.animateGeometry(false);
+      State.notify();
+    };
+    this.grip.addEventListener("pointerup", end);
+    this.grip.addEventListener("pointercancel", end);
+    this.grip.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      this.resetSize();
+    });
+  }
+
+  private endDrag() {
+    if (!this.drag) return;
+    if (this.grip.hasPointerCapture(this.drag.pointerId)) this.grip.releasePointerCapture(this.drag.pointerId);
+    this.drag = null;
+    this.islandEl.classList.remove("resizing");
+    this.pushedRect = { x: -1, y: -1, w: -1, h: -1 };
+  }
+
+  /** The OS window follows the island: larger while it is wide or tall, the default panel otherwise. */
+  private syncPanel() {
+    const w = Math.max(this.width.value, this.target.w);
+    const h = this.drag ? maxHeight(this.naturalSize().h, screenSize()) : Math.max(this.height.value, this.target.h);
+    const want = panelFor(w, h);
+    if (want.w === this.panel.w && want.h === this.panel.h) return;
+    this.panel = want;
+    if (want.w === PANEL_W && want.h === PANEL_H) void Bridge.resetPanelSize();
+    else void Bridge.setPanelSize(want.w, want.h);
+  }
+
+  /** Re-measures the auto width; springs to it when it changed. */
+  private refreshAutoWidth() {
+    if (State.mode !== "expanded") return;
+    const needs = this.views.get("session")?.needs?.() ?? [];
+    if (!needs.length) return;
+    const w = autoWidth(needs, screenSize());
+    if (Math.abs(w - this.autoW) < 1) return;
+    this.autoW = w;
+    this.animateGeometry(false);
+  }
+
+  /** Where the island is heading. Only a changed value restarts its animation (a re-sent target never turns a shrink into a bounce). */
+  private target = { w: STRIP_W, h: STRIP_H, r: ROUNDED_CORNER };
+
+  private animateGeometry(shrinking: boolean) {
+    const next = this.targetSize();
+    const move = (t: Tracked, from: number, to: number) => {
+      if (Math.abs(from - to) < 0.5) return;
+      if (shrinking) t.curveTowards(to);
+      else t.springTo(to);
+    };
+    move(this.width, this.target.w, next.w);
+    // While the grip is dragged the height follows the pointer, not a spring.
+    if (!this.drag) move(this.height, this.target.h, next.h);
+    move(this.radius, this.target.r, next.r);
+    this.target = next;
     this.ensureRunning();
+  }
+
+  /** The window's width: the island is centred in it (CSS left: 50%). */
+  private viewportW(): number {
+    return window.innerWidth > 0 ? window.innerWidth : this.panel.w;
   }
 
   private applyGeometry() {
@@ -447,7 +614,10 @@ export class Island {
     this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
     this.islandEl.style.transform = "translateX(-50%)";
     this.greetingCanvas.style.left = `${(w - GREETING_W) / 2}px`;
-    const rect = { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
+    // While the grip is dragged the whole window takes the pointer (see wireGrip).
+    const rect = this.drag
+      ? { x: 0, y: 0, w: this.viewportW(), h: window.innerHeight > 0 ? window.innerHeight : this.panel.h }
+      : { x: (this.viewportW() - w) / 2, y: 0, w, h: hh };
     const p = this.pushedRect;
     if (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5) {
       this.pushedRect = rect;
@@ -457,16 +627,19 @@ export class Island {
 
   private islandRect() {
     const w = this.width.value;
-    return { x: (PANEL_W - w) / 2, y: 0, w, h: this.height.value };
+    return { x: (this.viewportW() - w) / 2, y: 0, w, h: this.height.value };
   }
 
   // -- Input ----------------------------------------------------------------
 
   private wireInput() {
+    this.wireGrip();
+    this.islandEl.addEventListener("pointermove", () => (this.lastPointerAt = performance.now()));
     this.islandEl.addEventListener("mousedown", (e) => {
       Sound.resume();
       State.lastActivity = performance.now();
-      const onButton = (e.target as Element | null)?.closest("button, input, textarea, .tab");
+      this.lastPointerAt = performance.now();
+      const onButton = (e.target as Element | null)?.closest("button, input, textarea, .tab, #grip");
       if (State.mode !== "expanded") {
         if (!onButton) this.fsm.click();
         return;
@@ -480,6 +653,7 @@ export class Island {
     this.islandEl.addEventListener(
       "wheel",
       (e) => {
+        this.lastPointerAt = performance.now();
         if ((e.target as Element | null)?.closest(".scrollable")) return;
         e.preventDefault();
         const now = performance.now();
@@ -525,6 +699,7 @@ export class Island {
     const inIsland =
       x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
+    if (inIsland) this.lastPointerAt = performance.now();
     // wasInIsland must be current before the FSM runs: its transition handler reads it.
     if (inIsland && !this.wasInIsland) {
       this.wasInIsland = true;
@@ -622,10 +797,14 @@ export class Island {
     const dt = Math.min(0.05, (nowMs - this.lastFrame) / 1000);
     this.lastFrame = nowMs;
 
+    this.checkSizeReset(nowMs);
     this.width.step(dt, nowMs);
     this.height.step(dt, nowMs);
     this.radius.step(dt, nowMs);
     this.applyGeometry();
+    this.syncPanel();
+    // A changing height changes how many step rows fit.
+    if (State.mode === "expanded" && this.height.animating) this.dirty = true;
 
     if (State.flash && nowMs > State.flash.until) {
       State.flash = null;
@@ -639,6 +818,8 @@ export class Island {
       this.dirty = false;
       this.syncDom();
     }
+    // Invariant under the island's own width, so measuring while it springs is fine.
+    if (State.mode === "expanded" && (this.width.animating || this.height.animating)) this.refreshAutoWidth();
 
     this.updateBotTargets();
     this.botCx.step(dt);
@@ -661,7 +842,7 @@ export class Island {
     if (State.mode === "expanded") this.views.get(State.view)?.tick?.(nowMs);
     this.updateCountdown(nowMs);
 
-    const settling = this.width.animating || this.height.animating || this.radius.animating;
+    const settling = this.width.animating || this.height.animating || this.radius.animating || this.drag != null;
     const animating =
       settling || !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
       greetingActive || this.engine.busy || State.flash != null || State.notice != null;
@@ -759,9 +940,16 @@ export class Island {
     for (const [name, view] of this.views) {
       const on = expanded && name === State.view;
       view.el.classList.toggle("on", on);
-      if (on) view.sync();
+      // The session view stays current while expanded: its rows decide the width of every view.
+      if (on || (expanded && name === "session")) view.sync();
     }
-    if (expanded && State.view === "interaction") this.animateGeometry(false);
+    const big = this.sizable() && State.manualH != null;
+    this.islandEl.classList.toggle("big", big);
+    this.grip.classList.toggle("on", this.sizable() && !greetingActive);
+    if (expanded) {
+      this.refreshAutoWidth();
+      if (MEASURED_VIEWS.includes(State.view) || big) this.animateGeometry(false);
+    }
 
     this.engine.setState(State.effectiveState);
   }

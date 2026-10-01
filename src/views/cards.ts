@@ -9,7 +9,7 @@ import type { Interaction, Session } from "../core/types";
 import { fmtCountdown } from "../model/format";
 import { answersFor, pendingQueue } from "../model/viewmodel";
 import { createSubmitGuard } from "../model/submitguard";
-import { btn, sessionName, statusDot } from "./parts";
+import { btn, enlargeButton, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 const KIND_LABEL: Record<Interaction["kind"], string> = {
@@ -20,6 +20,9 @@ const KIND_LABEL: Record<Interaction["kind"], string> = {
 
 /** Clicks this soon after the card changed were aimed at the previous card. */
 const CHANGE_GRACE_MS = 500;
+/** The reply box grows from 2 to 6 rows when the island is enlarged. */
+const REPLY_ROWS = 2;
+const REPLY_ROWS_BIG = 6;
 
 const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
 
@@ -30,6 +33,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   const countdown = h("span", { class: "i-countdown" });
   const foot = h("div", { class: "i-foot" });
   const el = h("div", { class: "view interaction-view" }, head, body, notice, foot);
+  const enlarge = enlargeButton(() => actions.toggleEnlarge());
+  let replyBox: HTMLTextAreaElement | null = null;
 
   let shownId = "";
   let shownAt = 0;
@@ -144,7 +149,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   }
 
   function renderReply(item: Extract<Interaction, { kind: "reply" }>) {
-    const box = h("textarea", { class: "i-reply", rows: 2, placeholder: "Reply to Claude (Enter sends, Shift+Enter adds a line)" });
+    const box = h("textarea", { class: "i-reply", rows: REPLY_ROWS, placeholder: "Reply to Claude (Enter sends, Shift+Enter adds a line)" });
+    replyBox = box;
     const send = () => {
       const text = box.value.trim();
       if (text) answer(item.requestId, { reply: text });
@@ -164,6 +170,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   return {
     el,
     sync() {
+      enlarge.refresh();
       const queue = pendingQueue(State.sessions, State.focusId, shownId || null);
       current = queue[0] ?? null;
       guard.observe(State.notice);
@@ -185,8 +192,14 @@ export function buildInteraction(actions: ViewActions): ViewHost {
           sessionName(session, "i-who"),
           h("span", { class: "i-kind", text: KIND_LABEL[item.kind] }),
           queue.length > 1 ? h("span", { class: "i-queue", text: `+${queue.length - 1} waiting` }) : null,
+          enlarge.el,
         ]),
       );
+      const rows = State.manualH != null ? REPLY_ROWS_BIG : REPLY_ROWS;
+      if (replyBox && replyBox.rows !== rows) {
+        replyBox.rows = rows;
+        replyBox.classList.toggle("overflowing", replyBox.scrollHeight > replyBox.clientHeight + 1);
+      }
       if (item.requestId === shownId) return;
       shownId = item.requestId;
       shownAt = performance.now();
@@ -194,11 +207,13 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       picks = {};
       other = {};
       submit = null;
+      replyBox = null;
       if (item.kind === "approval") renderApproval(session, item);
       else if (item.kind === "question") renderQuestion(item);
       else renderReply(item);
       actions.relayout();
     },
+    anchorId: () => shownId || null,
     tick() {
       if (!current) return;
       const text = `Back to the terminal in ${fmtCountdown(current.item.deadline - Date.now())}`;

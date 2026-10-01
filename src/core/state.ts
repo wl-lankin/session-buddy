@@ -58,6 +58,10 @@ class AppState {
   /** Short message on the interaction card, e.g. when an answer arrived too late. */
   notice: { text: string; until: number } | null = null;
   lastActivity = performance.now();
+  /** Manual height of the expanded island (grip or enlarge button); null = natural size. */
+  manualH: number | null = null;
+  /** The session whose last answer is unfolded in the session view. */
+  answerOpenFor: string | null = null;
   settings: Settings = { ...DEFAULT_SETTINGS };
 
   private listeners = new Set<Listener>();

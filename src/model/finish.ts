@@ -76,13 +76,13 @@ export function finishTitle(items: FinishItem[]): string {
   return one.turnMs == null ? `${one.project} finished` : `${one.project} finished · ${fmtDuration(one.turnMs)}`;
 }
 
-/** The first two non-empty lines of Claude's last message. */
-export function finishLines(message: string | null | undefined): string {
+/** The first `max` non-empty lines of Claude's last message (all of them with Infinity). */
+export function finishLines(message: string | null | undefined, max = 2): string {
   if (!message) return "";
   return message
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
-    .slice(0, 2)
+    .slice(0, max)
     .join("\n");
 }

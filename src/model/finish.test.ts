@@ -97,3 +97,11 @@ describe("playsSound", () => {
     expect(playsSound({ kind: "approval", busy: true })).toBe(true);
   });
 });
+
+describe("finishLines with a limit", () => {
+  it("keeps one line, or every non-empty line", () => {
+    const msg = "One\n\n  Two  \nThree\nFour";
+    expect(finishLines(msg, 1)).toBe("One");
+    expect(finishLines(msg, Infinity)).toBe("One\nTwo\nThree\nFour");
+  });
+});

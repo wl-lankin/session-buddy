@@ -42,6 +42,28 @@ fn entry_is_ours(entry: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Removes only our inner hooks; an entry is dropped only when nothing else is left in it.
+fn strip_ours(list: &[Value]) -> Vec<Value> {
+    let mut kept = Vec::new();
+    for entry in list {
+        let Some(inner) = entry.get("hooks").and_then(Value::as_array) else {
+            kept.push(entry.clone());
+            continue;
+        };
+        let rest: Vec<Value> = inner.iter().filter(|h| !command_is_ours(h)).cloned().collect();
+        if rest.len() == inner.len() {
+            kept.push(entry.clone());
+        } else if !rest.is_empty() {
+            let mut e = entry.clone();
+            if let Some(obj) = e.as_object_mut() {
+                obj.insert("hooks".into(), Value::Array(rest));
+            }
+            kept.push(e);
+        }
+    }
+    kept
+}
+
 fn hook_command(relay: &str, event: &str) -> String {
     format!("\"{relay}\" hook {event}")
 }
@@ -58,8 +80,8 @@ pub fn install(existing: &Value, relay: &str) -> Installed {
     let mut root = existing.as_object().cloned().unwrap_or_default();
     let mut hooks = root.get("hooks").and_then(Value::as_object).cloned().unwrap_or_else(Map::new);
     for (event, timeout) in HOOK_EVENTS {
-        let mut list = hooks.get(*event).and_then(Value::as_array).cloned().unwrap_or_default();
-        list.retain(|e| !entry_is_ours(e));
+        let existing_list = hooks.get(*event).and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut list = strip_ours(&existing_list);
         list.push(json!({"hooks": [{"type": "command", "command": hook_command(relay, event), "timeout": timeout}]}));
         hooks.insert((*event).to_string(), Value::Array(list));
     }
@@ -93,7 +115,7 @@ pub fn uninstall(existing: &Value, saved: Option<&Value>) -> Value {
         for (event, value) in hooks {
             match value.as_array() {
                 Some(list) => {
-                    let kept: Vec<Value> = list.iter().filter(|e| !entry_is_ours(e)).cloned().collect();
+                    let kept = strip_ours(list);
                     if !kept.is_empty() {
                         out.insert(event, Value::Array(kept));
                     }
@@ -173,9 +195,20 @@ pub fn write_atomic(path: &Path, next: &Value, expected_fingerprint: &str) -> Re
     }
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let backup = path.with_file_name(format!("{name}.bak-{stamp}"));
-    if path.exists() {
-        std::fs::copy(path, &backup).map_err(|e| format!("backup failed: {e}"))?;
+    let mut backup = path.with_file_name(format!("{name}.bak-{stamp}"));
+    if !current.is_empty() || path.exists() {
+        let mut n = 1u32;
+        let mut file = loop {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+                Ok(f) => break f,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    n += 1;
+                    backup = path.with_file_name(format!("{name}.bak-{stamp}-{n}"));
+                }
+                Err(e) => return Err(format!("backup failed: {e}")),
+            }
+        };
+        std::io::Write::write_all(&mut file, &current).map_err(|e| format!("backup failed: {e}"))?;
     }
     let mut text = pretty(next);
     text.push('\n');
@@ -371,6 +404,46 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{\"a\":1}");
         assert!(backup.file_name().unwrap().to_string_lossy().starts_with("settings.json.bak-"));
         assert_eq!(parse_settings(&std::fs::read(&path).unwrap()).unwrap(), json!({"b": 2}));
+    }
+
+    #[test]
+    fn install_and_uninstall_keep_foreign_sibling_hooks() {
+        let foreign = json!({"type": "command", "command": "my-guard.sh"});
+        let ours = json!({"type": "command", "command": "\"x/sb-relay.exe\" hook PreToolUse"});
+        let original = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [foreign.clone(), ours]}]}});
+        assert!(hooks_installed(&original));
+        let installed = install(&original, RELAY);
+        let list = installed.settings["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(list[0], json!({"matcher": "Bash", "hooks": [foreign.clone()]}));
+        let back = uninstall(&installed.settings, installed.saved_status_line.as_ref());
+        assert_eq!(back["hooks"]["PreToolUse"], json!([{"matcher": "Bash", "hooks": [foreign.clone()]}]));
+        let clean = json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [foreign]}]}});
+        let rt = uninstall(&install(&clean, RELAY).settings, None);
+        assert_eq!(pretty(&rt), pretty(&clean));
+    }
+
+    #[test]
+    fn two_writes_in_one_second_keep_both_backups() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, b"{\"a\":1}").unwrap();
+        let b1 = write_atomic(&path, &json!({"b": 2}), &fingerprint(b"{\"a\":1}")).unwrap();
+        let now = std::fs::read(&path).unwrap();
+        let b2 = write_atomic(&path, &json!({"c": 3}), &fingerprint(&now)).unwrap();
+        assert_ne!(b1, b2);
+        assert_eq!(std::fs::read_to_string(&b1).unwrap(), "{\"a\":1}");
+        assert_eq!(std::fs::read(&b2).unwrap(), now);
+    }
+
+    #[test]
+    fn failed_write_leaves_original_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, b"{\"a\":1}").unwrap();
+        let blocker = dir.path().join(format!("settings.json.sb-{}", std::process::id()));
+        std::fs::create_dir(&blocker).unwrap();
+        assert!(write_atomic(&path, &json!({"b": 2}), &fingerprint(b"{\"a\":1}")).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
     }
 
     #[test]

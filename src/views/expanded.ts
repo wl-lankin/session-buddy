@@ -334,10 +334,10 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   const enlarge = enlargeButton(() => actions.toggleEnlarge());
   const fold = h("button", {
     class: "enlarge",
-    title: "Collapse the island now",
+    title: "Minimize to the strip",
     onclick: (e: Event) => {
       e.stopPropagation();
-      actions.collapse();
+      actions.minimize();
     },
   }, svg(ICONS.chevronUp, 14, { stroke: 2 }));
   const headEl = h("div", { class: "x-head" });

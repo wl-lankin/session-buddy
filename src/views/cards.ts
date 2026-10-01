@@ -1,6 +1,214 @@
+// The card for whatever is waiting for the user: a permission request, an
+// AskUserQuestion prompt, or a plain-text question at the end of a turn.
+// One card at a time, oldest first; the rest are counted, never replaced.
+
 import { h } from "./dom";
+import { State } from "../core/state";
+import type { Interaction, Session } from "../core/types";
+import { fmtCountdown } from "../model/format";
+import { answersFor, pendingQueue, sessionTitle } from "../model/viewmodel";
+import { btn, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
-export function buildInteraction(_actions: ViewActions): ViewHost {
-  return { el: h("div", { class: "view", text: "interaction view (Task 12)" }), sync() {} };
+const KIND_LABEL: Record<Interaction["kind"], string> = {
+  approval: "Permission",
+  question: "Question",
+  reply: "Claude asks",
+};
+
+const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
+
+export function buildInteraction(actions: ViewActions): ViewHost {
+  const head = h("div", { class: "i-head" });
+  const body = h("div", { class: "i-body" });
+  const notice = h("div", { class: "i-notice" });
+  const countdown = h("span", { class: "i-countdown" });
+  const foot = h("div", { class: "i-foot" });
+  const el = h("div", { class: "view interaction-view" }, head, body, notice, foot);
+
+  let shownId = "";
+  let current: { session: Session; item: Interaction } | null = null;
+  let picks: Record<string, string[]> = {};
+  let other: Record<string, string> = {};
+  let submit: HTMLButtonElement | null = null;
+  let sent = false;
+  let noticeAtSend: unknown = null;
+
+  const controls = () => Array.from(el.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea"));
+
+  // Blocks a double submit until the snapshot removes the item (or the hub reported an error).
+  const answer = (requestId: string, payload: unknown) => {
+    if (sent) return;
+    sent = true;
+    noticeAtSend = State.notice;
+    controls().forEach((c) => (c.disabled = true));
+    actions.answer(requestId, payload);
+  };
+
+  const focusField = (field: HTMLInputElement | HTMLTextAreaElement) => {
+    actions.wantKeyboard(true);
+    window.setTimeout(() => field.focus(), 120);
+  };
+
+  const terminalBtn = (requestId: string) => btn("Answer in terminal", "secondary", () => actions.release(requestId));
+
+  function refreshSubmit() {
+    if (!submit || current?.item.kind !== "question") return;
+    submit.disabled = sent || answersFor(current.item.questions, picks, other) == null;
+  }
+
+  function renderApproval(session: Session, item: Extract<Interaction, { kind: "approval" }>) {
+    const agent = item.agentId ? session.agents.find((a) => a.id === item.agentId) : undefined;
+    body.replaceChildren(
+      ...present([
+        h("div", { class: "title", text: `Allow ${item.tool}?` }),
+        agent ? h("div", { class: "sub", text: `Requested by sub-agent ${agent.agentType}` }) : null,
+        h("pre", { class: "code scrollable i-target", text: item.target }),
+      ]),
+    );
+    foot.replaceChildren(
+      countdown,
+      h("span", { class: "grow" }),
+      terminalBtn(item.requestId),
+      btn("Deny", "danger", () => answer(item.requestId, { behavior: "deny" })),
+      btn("Allow", "primary", () => answer(item.requestId, { behavior: "allow" })),
+    );
+  }
+
+  function renderQuestion(item: Extract<Interaction, { kind: "question" }>) {
+    const blocks = item.questions.map((q) => {
+      const opts = h("div", { class: "i-options" });
+      const otherInput = h("input", { class: "i-other", placeholder: "Other..." });
+      const renderOpts = () => {
+        opts.replaceChildren(
+          ...q.options.map((o) => {
+            const on = (picks[q.question] ?? []).includes(o.label);
+            return h(
+              "button",
+              {
+                class: `opt${on ? " on" : ""}`,
+                title: o.description ?? "",
+                onclick: (e: Event) => {
+                  e.stopPropagation();
+                  const cur = picks[q.question] ?? [];
+                  picks[q.question] = q.multiSelect ? (on ? cur.filter((x) => x !== o.label) : [...cur, o.label]) : [o.label];
+                  if (!q.multiSelect) {
+                    other[q.question] = "";
+                    otherInput.value = "";
+                  }
+                  renderOpts();
+                  refreshSubmit();
+                },
+              },
+              ...present([h("span", { class: "opt-label", text: o.label }), o.description ? h("span", { class: "opt-desc", text: o.description }) : null]),
+            );
+          }),
+        );
+      };
+      otherInput.addEventListener("mousedown", () => focusField(otherInput));
+      otherInput.addEventListener("input", () => {
+        other[q.question] = otherInput.value;
+        if (!q.multiSelect && otherInput.value.trim()) {
+          picks[q.question] = [];
+          renderOpts();
+        }
+        refreshSubmit();
+      });
+      renderOpts();
+      return h(
+        "div",
+        { class: "i-q" },
+        ...present([
+          q.header ? h("span", { class: "chip", text: q.header }) : null,
+          h("div", { class: "i-qtext", text: q.question }),
+          q.multiSelect ? h("div", { class: "sub", text: "Pick any" }) : null,
+          opts,
+          otherInput,
+        ]),
+      );
+    });
+    body.replaceChildren(h("div", { class: "i-questions scrollable" }, ...blocks));
+    submit = btn("Submit", "primary", () => {
+      const answers = answersFor(item.questions, picks, other);
+      if (answers) answer(item.requestId, { answers });
+    });
+    foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), submit);
+    refreshSubmit();
+  }
+
+  function renderReply(item: Extract<Interaction, { kind: "reply" }>) {
+    const box = h("textarea", { class: "i-reply", rows: 2, placeholder: "Reply to Claude (Enter sends, Shift+Enter adds a line)" });
+    const send = () => {
+      const text = box.value.trim();
+      if (text) answer(item.requestId, { reply: text });
+    };
+    box.addEventListener("mousedown", () => focusField(box));
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+    body.replaceChildren(h("div", { class: "i-message scrollable", text: item.message }), box);
+    foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), btn("Send", "primary", send));
+  }
+
+  return {
+    el,
+    sync() {
+      const queue = pendingQueue(State.sessions, State.focusId);
+      current = queue[0] ?? null;
+      if (sent && State.notice && State.notice !== noticeAtSend) {
+        sent = false;
+        controls().forEach((c) => (c.disabled = false));
+        refreshSubmit();
+      }
+      notice.textContent = State.notice?.text ?? "";
+      notice.style.display = State.notice ? "" : "none";
+      if (!current) {
+        if (shownId) {
+          shownId = "";
+          head.replaceChildren();
+          body.replaceChildren();
+          foot.replaceChildren();
+        }
+        return;
+      }
+      const { session, item } = current;
+      head.replaceChildren(
+        ...present([
+          statusDot(session),
+          h("span", { class: "i-who", text: sessionTitle(session) }),
+          h("span", { class: "i-kind", text: KIND_LABEL[item.kind] }),
+          queue.length > 1 ? h("span", { class: "i-queue", text: `+${queue.length - 1} waiting` }) : null,
+        ]),
+      );
+      if (item.requestId === shownId) return;
+      shownId = item.requestId;
+      sent = false;
+      picks = {};
+      other = {};
+      submit = null;
+      if (item.kind === "approval") renderApproval(session, item);
+      else if (item.kind === "question") renderQuestion(item);
+      else renderReply(item);
+      actions.relayout();
+    },
+    tick() {
+      if (!current) return;
+      const text = `Back to the terminal in ${fmtCountdown(current.item.deadline - Date.now())}`;
+      if (countdown.textContent !== text) countdown.textContent = text;
+    },
+    measure() {
+      return el.scrollHeight + 22;
+    },
+    key(e) {
+      if (!current || current.item.kind !== "question") return false;
+      if (e.key === "Enter" && !(e.target as Element | null)?.closest("textarea")) {
+        submit?.click();
+        return true;
+      }
+      return false;
+    },
+  };
 }

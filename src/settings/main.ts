@@ -3,6 +3,7 @@
 
 import "./settings.css";
 import { Bridge, IS_TAURI, type BootInfo, type InstallStatus } from "../core/bridge";
+import { installNoBrowser } from "../core/nobrowser";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h } from "../views/dom";
 import { normalizeNumber } from "./helpers";
@@ -254,4 +255,5 @@ async function main() {
   }
 }
 
+installNoBrowser();
 void main();

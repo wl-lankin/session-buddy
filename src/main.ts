@@ -2,6 +2,7 @@
 
 import "./style.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
+import { installNoBrowser } from "./core/nobrowser";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import type { Cue, Snapshot } from "./core/types";
@@ -46,4 +47,5 @@ async function main() {
   }
 }
 
+installNoBrowser();
 void main();

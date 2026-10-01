@@ -453,7 +453,8 @@ body {
 
 .x-main { display: grid; grid-template-columns: minmax(0, 1fr) var(--acct-w, 190px); grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
 
-.x-session { display: flex; flex-direction: column; padding: 9px 12px 8px; min-height: 0; overflow: hidden; }
+/* The session sits on the island itself (no box); its left edge moves toward Buddy, the padding stays. */
+.x-session { display: flex; flex-direction: column; padding: 9px 12px 8px; margin-left: -8px; min-height: 0; overflow: hidden; background: none; border: 0; border-radius: 0; }
 .x-head { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .x-title { display: flex; align-items: center; gap: 6px; min-width: 0; height: 20px; white-space: nowrap; }
 .x-name { font: 600 14px var(--font); color: var(--ink); }

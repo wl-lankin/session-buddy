@@ -184,6 +184,7 @@ async function main() {
       row("Expanded closes after", numberInput(() => settings.autoCloseInterval, (v) => (settings.autoCloseInterval = v), 3, 120), "seconds"),
       row("Card shrinks to the strip after", numberInput(() => settings.compactInterval, (v) => (settings.compactInterval = v), 2, 120), "seconds"),
       row("When a session finishes", finish, "the sound plays in every mode while sounds are on"),
+      row("Show the card for turns longer than", numberInput(() => settings.finishMinSeconds, (v) => (settings.finishMinSeconds = v), 0, 3600), "seconds; shorter turns, and turns that leave agents running, get the sound and a short emote"),
       row("Screen", screen),
       row("Hotkey", hotkey, "opens the island from anywhere, e.g. Ctrl+Alt+Space"),
     ),

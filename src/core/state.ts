@@ -18,6 +18,8 @@ export interface Settings {
   contextSound: boolean;
   /** What a finishing session does: the card plus Mochi, Mochi only, or just the sound. */
   finishStyle: FinishStyle;
+  /** The finished card only shows for turns at least this long, seconds. */
+  finishMinSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkey: "Ctrl+Alt+Space",
   contextSound: true,
   finishStyle: "card",
+  finishMinSeconds: 60,
 };
 
 type Listener = () => void;

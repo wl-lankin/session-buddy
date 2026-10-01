@@ -356,9 +356,12 @@ export class Island {
       mode: State.mode,
       view: State.view,
       anyPending: pendingQueue(State.sessions, State.focusId).length > 0,
+      busy: c.busy ?? false,
+      turnMs: c.turnMs ?? null,
+      minSeconds: State.settings.finishMinSeconds,
     });
     if (plan.flash) State.flash = { sessionId: c.sessionId, until: performance.now() + FLASH_MS };
-    if (plan.emote) this.celebrate();
+    if (plan.emote) this.celebrate(plan.jump);
     if (plan.card) {
       const project = State.snapshot.sessions.find((s) => s.id === c.sessionId)?.project ?? "Session";
       this.showFinished({ sessionId: c.sessionId, project, turnMs: c.turnMs ?? null, at: Date.now() });
@@ -366,10 +369,10 @@ export class Island {
     if (plan.reveal) this.fsm.reveal();
   }
 
-  /** Proud eyes and stars plus a small jump, once per finish. */
-  private celebrate() {
+  /** Proud eyes and stars, plus a small jump for the real thing, once per finish. */
+  private celebrate(jump: boolean) {
     this.engine.triggerEmote("proud");
-    this.engine.anim("oy", [[-0.3, 140, Ease.out], [0, 380, Ease.back]]);
+    if (jump) this.engine.anim("oy", [[-0.3, 140, Ease.out], [0, 380, Ease.back]]);
   }
 
   /** Opens (or extends) the finished card. It never pins: it closes after FINISH_CARD_S unless hovered. */

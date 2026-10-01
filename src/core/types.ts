@@ -76,8 +76,10 @@ export type CueKind = "work" | "finish" | "error" | "approval" | "rate" | "conte
 export interface Cue {
   sessionId: string;
   kind: CueKind;
-  /** Finish cues: how long the turn took, when its start was seen. */
+  /** Finish cues: how long the turn took, when its start was seen (after background work: since the prompt). */
   turnMs?: number;
+  /** Finish cues: agents or background tasks are still running. */
+  busy?: boolean;
 }
 
 export const EMPTY_SNAPSHOT: Snapshot = {

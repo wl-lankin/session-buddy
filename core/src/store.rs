@@ -127,6 +127,13 @@ pub struct Session {
     /// When the current turn started (prompt, or the first work event when the prompt was not seen).
     #[serde(skip)]
     pub turn_started_at: Option<i64>,
+    /// When the work for the last typed prompt started; outlives the turn while agents or
+    /// background tasks keep running after its Stop.
+    #[serde(skip)]
+    pub work_started_at: Option<i64>,
+    /// The last Stop left agents or background tasks running: their end is the real completion.
+    #[serde(skip)]
+    pub finish_deferred: bool,
     /// The plan Claude Code is asking to approve (ExitPlanMode). Answered only in the terminal.
     pub plan: Option<String>,
 }
@@ -147,14 +154,18 @@ pub enum CueKind {
 pub struct Cue {
     pub session_id: String,
     pub kind: CueKind,
-    /// Finish cues: how long the turn took.
+    /// Finish cues: how long the turn took (for the real completion after
+    /// background work: how long since the prompt).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_ms: Option<i64>,
+    /// Finish cues: agents or background tasks are still running, so this is not the real end.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub busy: bool,
 }
 
 impl Cue {
     pub fn new(session_id: String, kind: CueKind) -> Self {
-        Self { session_id, kind, turn_ms: None }
+        Self { session_id, kind, turn_ms: None, busy: false }
     }
 }
 
@@ -208,6 +219,8 @@ impl Session {
             first_cwd: None,
             toplevel_checked: false,
             turn_started_at: None,
+            work_started_at: None,
+            finish_deferred: false,
             plan: None,
         }
     }
@@ -222,6 +235,7 @@ impl Session {
         match next {
             Status::Thinking | Status::Working => {
                 self.turn_started_at.get_or_insert(now);
+                self.work_started_at.get_or_insert(now);
             }
             Status::NeedsYou => {}
             Status::Finished => self.turn_started_at = None,
@@ -281,6 +295,11 @@ impl Session {
             .or(if self.agent_descriptions.is_empty() { None } else { Some(0) })?;
         let (_, d) = self.agent_descriptions.remove(i);
         (!d.is_empty()).then_some(d)
+    }
+
+    /// Sub-agents or background tasks still running.
+    fn busy(&self) -> bool {
+        self.agents.iter().any(|a| a.running) || self.background.iter().any(|b| b.status == "running")
     }
 
     fn update_background(&mut self, p: &Value) {
@@ -367,6 +386,7 @@ impl Store {
 
         let mut cues = Vec::new();
         let mut finished_turn = None;
+        let mut busy = false;
         let mut cue = |kind| cues.push(Cue::new(id.clone(), kind));
 
         match event {
@@ -375,6 +395,9 @@ impl Store {
                 // Wrappers such as <agent-message>, <command-name> or <system-reminder> are not typed prompts.
                 if let Some(t) = s(p, "prompt").map(str::trim).filter(|t| !t.is_empty() && !t.starts_with('<')) {
                     sess.last_prompt = Some(clip(t, 300));
+                    // A typed prompt starts new work; a wrapper (an agent's result) continues the old.
+                    sess.work_started_at = Some(now);
+                    sess.finish_deferred = false;
                 }
                 sess.turn_started_at = Some(now);
                 sess.plan = None;
@@ -468,7 +491,14 @@ impl Store {
                         cue(CueKind::Approval);
                     }
                     None => {
-                        finished_turn = sess.turn_started_at.map(|t| now - t);
+                        // After a deferred finish the work runs since the prompt, not since this turn.
+                        let since = if sess.finish_deferred { sess.work_started_at.or(sess.turn_started_at) } else { sess.turn_started_at };
+                        finished_turn = since.map(|t| now - t);
+                        busy = sess.busy();
+                        sess.finish_deferred = busy;
+                        if !busy {
+                            sess.work_started_at = None;
+                        }
                         sess.set_status(Status::Finished, now);
                         if sess.status == Status::Finished {
                             cue(CueKind::Finish);
@@ -501,11 +531,19 @@ impl Store {
                     a.current_step = None;
                 }
                 sess.update_background(p);
+                // The last agent of a finished turn is done: that is the real completion.
+                if sess.finish_deferred && !sess.busy() && matches!(sess.status, Status::Finished | Status::Idle) {
+                    finished_turn = sess.work_started_at.map(|t| now - t);
+                    sess.finish_deferred = false;
+                    sess.work_started_at = None;
+                    cue(CueKind::Finish);
+                }
             }
             _ => {}
         }
         for c in cues.iter_mut().filter(|c| c.kind == CueKind::Finish) {
             c.turn_ms = finished_turn;
+            c.busy = busy;
         }
         cues
     }
@@ -710,7 +748,7 @@ mod tests {
     fn session_created_with_project_and_terminal() {
         let mut st = Store::default();
         let cues = st.apply_hook(&ev("SessionStart", json!({"term_program": "WarpTerminal"})), T0);
-        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Work, turn_ms: None }]);
+        assert_eq!(cues, vec![Cue::new("s1".into(), CueKind::Work)]);
         let s = sess(&st);
         assert_eq!(s.project, "pushdocs");
         assert_eq!(s.term_program.as_deref(), Some("WarpTerminal"));
@@ -1081,7 +1119,7 @@ mod tests {
         st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Read"})), T0 + 1_000);
         st.apply_hook(&ev("PostToolUse", json!({"tool_name": "Read"})), T0 + 2_000);
         let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 65_000);
-        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Finish, turn_ms: Some(65_000) }]);
+        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Finish, turn_ms: Some(65_000), busy: false }]);
         let v = serde_json::to_value(&cues[0]).unwrap();
         assert_eq!(v["turnMs"], 65_000);
         // A turn whose start was never seen (app started mid-turn) starts at its first work event.
@@ -1095,6 +1133,60 @@ mod tests {
         let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 1);
         assert_eq!(cues[0].turn_ms, None);
         assert!(serde_json::to_value(&cues[0]).unwrap().get("turnMs").is_none());
+    }
+
+    #[test]
+    fn a_stop_with_running_agents_is_busy_and_their_end_is_the_real_finish() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a1", "agent_type": "Explore"})), T0 + 1_000);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 10_000);
+        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Finish, turn_ms: Some(10_000), busy: true }]);
+        assert_eq!(serde_json::to_value(&cues[0]).unwrap()["busy"], true);
+        // The finished status falls back to idle while the agent keeps working.
+        st.tick(T0 + 10_000 + FINISHED_TO_IDLE_MS);
+        assert_eq!(sess(&st).status, Status::Idle);
+        let cues = st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a1"})), T0 + 90_000);
+        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Finish, turn_ms: Some(90_000), busy: false }], "measured from the prompt");
+        assert!(serde_json::to_value(&cues[0]).unwrap().get("busy").is_none(), "false is left out");
+        // Only once.
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a2"})), T0 + 91_000);
+        assert!(st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a2"})), T0 + 92_000).is_empty());
+    }
+
+    #[test]
+    fn background_tasks_from_the_stop_payload_also_defer_the_finish() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0);
+        let running = json!([{"id": "a1", "type": "subagent", "status": "running", "description": "d"}]);
+        let cues = st.apply_hook(&ev("Stop", json!({"background_tasks": running})), T0 + 5_000);
+        assert!(cues[0].busy);
+        // One of two agents ends: not done yet.
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a2"})), T0 + 6_000);
+        let cues = st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a2", "background_tasks": running})), T0 + 7_000);
+        assert!(cues.is_empty(), "a background task still runs");
+        let cues = st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a1", "background_tasks": []})), T0 + 70_000);
+        assert_eq!(cues[0].kind, CueKind::Finish);
+        assert_eq!(cues[0].turn_ms, Some(70_000));
+        assert!(!cues[0].busy);
+    }
+
+    #[test]
+    fn a_follow_up_turn_after_a_deferred_finish_measures_from_the_typed_prompt() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a1"})), T0 + 1);
+        st.apply_hook(&ev("Stop", json!({})), T0 + 5_000);
+        // The agent's result comes back as a wrapped prompt while it is still marked running.
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "<agent-message>done</agent-message>"})), T0 + 50_000);
+        st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a1"})), T0 + 50_001);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 60_000);
+        assert_eq!(cues[0].turn_ms, Some(60_000));
+        assert!(!cues[0].busy);
+        // A new typed prompt starts from scratch.
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "next"})), T0 + 100_000);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 103_000);
+        assert_eq!(cues[0].turn_ms, Some(3_000));
     }
 
     #[test]

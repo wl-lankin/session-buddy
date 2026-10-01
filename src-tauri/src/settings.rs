@@ -23,6 +23,8 @@ pub struct Settings {
     pub context_sound: bool,
     /// What happens when a session finishes: "card", "animation" or "off".
     pub finish_style: String,
+    /// The finished card only shows for turns at least this long, seconds; shorter ones get the sound and a short emote.
+    pub finish_min_seconds: f64,
 }
 
 impl Default for Settings {
@@ -39,6 +41,7 @@ impl Default for Settings {
             hotkey: "Ctrl+Alt+Space".into(),
             context_sound: true,
             finish_style: "card".into(),
+            finish_min_seconds: 60.0,
         }
     }
 }
@@ -65,8 +68,10 @@ mod tests {
     fn older_files_get_the_default_finish_style() {
         let s: Settings = serde_json::from_str(r#"{"soundEnabled": false}"#).unwrap();
         assert_eq!(s.finish_style, "card");
+        assert_eq!(s.finish_min_seconds, 60.0);
         assert!(!s.sound_enabled);
         let v = serde_json::to_value(Settings { finish_style: "off".into(), ..Settings::default() }).unwrap();
         assert_eq!(v["finishStyle"], "off");
+        assert_eq!(v["finishMinSeconds"], 60.0);
     }
 }

@@ -25,20 +25,40 @@ export function mergeFinish(items: FinishItem[], next: FinishItem, shown: boolea
 export interface FinishPlan {
   /** Open the expanded island on the finished card. */
   card: boolean;
-  /** Mochi: proud plus a small jump. */
+  /** Mochi: proud. */
   emote: boolean;
+  /** Mochi: a small jump with the proud face. */
+  jump: boolean;
   /** The compact island shows the last message for a while. */
   flash: boolean;
   /** Strip to compact. */
   reveal: boolean;
 }
 
-export function planFinish(o: { style: FinishStyle; mode: IslandMode; view: IslandViewName; anyPending: boolean }): FinishPlan {
-  if (o.style === "off") return { card: false, emote: false, flash: false, reveal: false };
-  if (o.style === "animation") return { card: false, emote: true, flash: true, reveal: false };
+const NOTHING: FinishPlan = { card: false, emote: false, jump: false, flash: false, reveal: false };
+/** A short turn, or one that left agents or background tasks running: the sound and a short emote. */
+const SHORT: FinishPlan = { card: false, emote: true, jump: false, flash: false, reveal: false };
+
+/** The card is worth showing: nothing is still running and the work took at least `minSeconds`. */
+export function cardWorthy(o: { busy: boolean; turnMs: number | null; minSeconds: number }): boolean {
+  return !o.busy && o.turnMs != null && o.turnMs >= o.minSeconds * 1000;
+}
+
+export function planFinish(o: {
+  style: FinishStyle;
+  mode: IslandMode;
+  view: IslandViewName;
+  anyPending: boolean;
+  busy: boolean;
+  turnMs: number | null;
+  minSeconds: number;
+}): FinishPlan {
+  if (o.style === "off") return NOTHING;
+  if (o.style === "animation") return { card: false, emote: true, jump: true, flash: true, reveal: false };
+  if (!cardWorthy(o)) return SHORT;
   // Never cover a waiting card, and leave the greeting / confused views alone.
   const card = !o.anyPending && (o.mode !== "expanded" || o.view === "session" || o.view === "finished");
-  return { card, emote: true, flash: !card, reveal: !card && o.mode === "strip" };
+  return { card, emote: true, jump: true, flash: !card, reveal: !card && o.mode === "strip" };
 }
 
 export function finishTitle(items: FinishItem[]): string {

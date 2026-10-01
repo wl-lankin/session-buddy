@@ -7,6 +7,7 @@ import { State } from "../core/state";
 import type { Interaction, Session } from "../core/types";
 import { fmtCountdown } from "../model/format";
 import { answersFor, pendingQueue, sessionTitle } from "../model/viewmodel";
+import { createSubmitGuard } from "../model/submitguard";
 import { btn, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
@@ -31,18 +32,14 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   let picks: Record<string, string[]> = {};
   let other: Record<string, string> = {};
   let submit: HTMLButtonElement | null = null;
-  let sent = false;
-  let noticeAtSend: unknown = null;
+  // Only the answering actions lock; "Answer in terminal" and the text fields stay usable.
+  const guard = createSubmitGuard<typeof State.notice>((locked) => {
+    el.querySelectorAll<HTMLButtonElement>(".btn.primary, .btn.danger, .opt").forEach((c) => (c.disabled = locked));
+    if (!locked) refreshSubmit();
+  });
 
-  const controls = () => Array.from(el.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>("button, input, textarea"));
-
-  // Blocks a double submit until the snapshot removes the item (or the hub reported an error).
   const answer = (requestId: string, payload: unknown) => {
-    if (sent) return;
-    sent = true;
-    noticeAtSend = State.notice;
-    controls().forEach((c) => (c.disabled = true));
-    actions.answer(requestId, payload);
+    if (guard.lock(State.notice)) actions.answer(requestId, payload);
   };
 
   const focusField = (field: HTMLInputElement | HTMLTextAreaElement) => {
@@ -54,7 +51,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
 
   function refreshSubmit() {
     if (!submit || current?.item.kind !== "question") return;
-    submit.disabled = sent || answersFor(current.item.questions, picks, other) == null;
+    submit.disabled = guard.locked || answersFor(current.item.questions, picks, other) == null;
   }
 
   function renderApproval(session: Session, item: Extract<Interaction, { kind: "approval" }>) {
@@ -90,6 +87,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
                 title: o.description ?? "",
                 onclick: (e: Event) => {
                   e.stopPropagation();
+                  if (guard.locked) return;
                   const cur = picks[q.question] ?? [];
                   picks[q.question] = q.multiSelect ? (on ? cur.filter((x) => x !== o.label) : [...cur, o.label]) : [o.label];
                   if (!q.multiSelect) {
@@ -158,11 +156,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     sync() {
       const queue = pendingQueue(State.sessions, State.focusId);
       current = queue[0] ?? null;
-      if (sent && State.notice && State.notice !== noticeAtSend) {
-        sent = false;
-        controls().forEach((c) => (c.disabled = false));
-        refreshSubmit();
-      }
+      guard.observe(State.notice);
       notice.textContent = State.notice?.text ?? "";
       notice.style.display = State.notice ? "" : "none";
       if (!current) {
@@ -185,7 +179,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       );
       if (item.requestId === shownId) return;
       shownId = item.requestId;
-      sent = false;
+      guard.reset();
       picks = {};
       other = {};
       submit = null;

@@ -1,5 +1,6 @@
 //! session-buddy: shows and answers every running Claude Code session.
 
+mod autostart;
 mod install;
 mod ipc;
 mod island;
@@ -337,7 +338,11 @@ pub fn run() {
             if let Some(win) = island::window(&handle) {
                 island::prepare(&win);
             }
-            let screen = shared.settings.lock().unwrap().screen.clone();
+            let (screen, autostart_on) = {
+                let s = shared.settings.lock().unwrap();
+                (s.screen.clone(), s.autostart)
+            };
+            autostart::refresh(&handle, autostart_on);
             island::apply_geometry(&handle, &screen);
             island::spawn_cursor_poll(handle.clone(), shared.gate.clone());
             ipc::start(shared.hub.clone());

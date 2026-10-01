@@ -26,6 +26,7 @@ sb-common = { path = "../common" }
 sb-core = { path = "../core" }
 
 [target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",

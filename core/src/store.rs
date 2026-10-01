@@ -490,7 +490,7 @@ impl Store {
                 changed = true;
             }
             let before = s.agents.len();
-            s.agents.retain(|a| a.running || a.ended_at.map_or(true, |e| now - e < ENDED_AGENT_KEEP_MS));
+            s.agents.retain(|a| a.running || a.ended_at.is_none_or(|e| now - e < ENDED_AGENT_KEEP_MS));
             changed |= s.agents.len() != before;
         }
         changed

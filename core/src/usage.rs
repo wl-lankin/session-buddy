@@ -75,7 +75,7 @@ fn pretty_plan(raw: &str) -> String {
 pub fn parse_account(claude_json: &Value) -> Option<Account> {
     let o = claude_json.get("oauthAccount")?;
     let get = |k: &str| o.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
-    let plan = get("seatTier").or_else(|| get("organizationType")).or_else(|| get("billingType")).map(|p| pretty_plan(&p));
+    let plan = get("organizationType").or_else(|| get("seatTier")).map(|p| pretty_plan(&p)).filter(|p| !p.is_empty());
     Some(Account { email: get("emailAddress"), org: get("organizationName"), plan })
 }
 
@@ -92,22 +92,31 @@ pub fn decide(rate_limits: Option<&(Value, i64)>, last_fetch: i64, now: i64) -> 
     if now - last_fetch >= OAUTH_EVERY_MS { Plan::Fetch } else { Plan::Keep }
 }
 
-pub fn apply_statusline(u: &mut Usage, v: &Value, at: i64) {
+/// Merges parsed limits into `u`. An empty response is an error and leaves the
+/// previous values untouched; a single present window only replaces its own side.
+fn apply_limits(u: &mut Usage, v: &Value, at: i64, source: UsageSource) {
     let (f, s) = parse_limits(v);
-    u.five_hour = f;
-    u.seven_day = s;
-    u.source = UsageSource::Statusline;
+    if f.is_none() && s.is_none() {
+        apply_error(u, "usage response had no limits".into());
+        return;
+    }
+    if f.is_some() {
+        u.five_hour = f;
+    }
+    if s.is_some() {
+        u.seven_day = s;
+    }
+    u.source = source;
     u.updated_at = Some(at);
     u.error = None;
 }
 
+pub fn apply_statusline(u: &mut Usage, v: &Value, at: i64) {
+    apply_limits(u, v, at, UsageSource::Statusline);
+}
+
 pub fn apply_oauth(u: &mut Usage, v: &Value, at: i64) {
-    let (f, s) = parse_limits(v);
-    u.five_hour = f;
-    u.seven_day = s;
-    u.source = UsageSource::Oauth;
-    u.updated_at = Some(at);
-    u.error = None;
+    apply_limits(u, v, at, UsageSource::Oauth);
 }
 
 pub fn apply_error(u: &mut Usage, err: String) {
@@ -141,10 +150,16 @@ mod tests {
         let team = json!({"oauthAccount": {"emailAddress": "w@finodata.de", "organizationName": "finodata", "seatTier": "team_standard"}});
         assert_eq!(parse_account(&team).unwrap().plan.as_deref(), Some("Team Standard"));
         assert!(parse_account(&json!({})).is_none());
+        let real_team = json!({"oauthAccount": {"emailAddress": "w@finodata.de", "organizationType": "claude_team", "seatTier": "team_tier_1", "billingType": "stripe_subscription"}});
+        assert_eq!(parse_account(&real_team).unwrap().plan.as_deref(), Some("Team"));
+        let seat_only = json!({"oauthAccount": {"seatTier": "team_tier_1"}});
+        assert_eq!(parse_account(&seat_only).unwrap().plan.as_deref(), Some("Team Tier 1"));
+        let billing_only = json!({"oauthAccount": {"emailAddress": "a@b.de", "billingType": "stripe_subscription"}});
+        assert_eq!(parse_account(&billing_only).unwrap().plan, None);
     }
 
     #[test]
-    fn token_from_both_credential_stores() {
+    fn token_from_credentials_json() {
         assert_eq!(token_from_credentials(&json!({"claudeAiOauth": {"accessToken": "sk-ant-oat-x"}})).as_deref(), Some("sk-ant-oat-x"));
         assert!(token_from_credentials(&json!({})).is_none());
     }
@@ -174,5 +189,30 @@ mod tests {
         let v = serde_json::to_value(&u).unwrap();
         assert_eq!(v["fiveHour"]["usedPct"], 31.0);
         assert_eq!(v["source"], "statusline");
+    }
+
+    #[test]
+    fn empty_response_is_an_error_and_keeps_values() {
+        let mut u = Usage::default();
+        apply_oauth(&mut u, &json!({"five_hour": {"utilization": 30}, "seven_day": {"utilization": 10}}), 5);
+        apply_oauth(&mut u, &json!({}), 9);
+        apply_statusline(&mut u, &json!({"five_hour": null}), 10);
+        assert_eq!(u.five_hour.as_ref().unwrap().used_pct, 30.0);
+        assert_eq!(u.seven_day.as_ref().unwrap().used_pct, 10.0);
+        assert_eq!(u.source, UsageSource::Oauth);
+        assert_eq!(u.updated_at, Some(5));
+        assert_eq!(u.error.as_deref(), Some("usage response had no limits"));
+    }
+
+    #[test]
+    fn one_window_keeps_the_other() {
+        let mut u = Usage::default();
+        apply_oauth(&mut u, &json!({"five_hour": {"utilization": 30}, "seven_day": {"utilization": 10}}), 5);
+        apply_statusline(&mut u, &json!({"five_hour": {"used_percentage": 50}}), 9);
+        assert_eq!(u.five_hour.as_ref().unwrap().used_pct, 50.0);
+        assert_eq!(u.seven_day.as_ref().unwrap().used_pct, 10.0);
+        assert_eq!(u.source, UsageSource::Statusline);
+        assert_eq!(u.updated_at, Some(9));
+        assert!(u.error.is_none());
     }
 }

@@ -232,7 +232,7 @@ fn adopt_running(app: &AppHandle) {
         return;
     }
     let procs = adopt::claude_processes(&process::list_processes());
-    if shared.hub.store.lock().unwrap().adopt(&procs, cfg!(windows)) {
+    if shared.hub.store.lock().unwrap().adopt(&procs, cfg!(windows), now_ms()) {
         mark_dirty();
     }
 }

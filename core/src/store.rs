@@ -649,8 +649,10 @@ impl Store {
 
     /// Gives seeded sessions the running Claude Code process in their directory
     /// (see `adopt::match_processes`) and makes them live. Processes some session
-    /// already has are skipped. Returns true when any session was claimed.
-    pub fn adopt(&mut self, procs: &[ClaudeProcess], windows: bool) -> bool {
+    /// already has are skipped. A claimed session that went stale while it waited is
+    /// idle again from `now`: its process runs, so it counts and the stale timers restart.
+    /// Returns true when any session was claimed.
+    pub fn adopt(&mut self, procs: &[ClaudeProcess], windows: bool, now: i64) -> bool {
         let known: Vec<u32> = self.sessions.values().filter_map(|s| s.pid).collect();
         let free: Vec<ClaudeProcess> = procs.iter().filter(|p| !known.contains(&p.pid)).cloned().collect();
         let mut candidates: Vec<Candidate> = self
@@ -665,6 +667,10 @@ impl Store {
             if let Some(s) = self.sessions.get_mut(id) {
                 s.pid = Some(*pid);
                 s.live = true;
+                if s.status == Status::Stale {
+                    s.last_event_at = now;
+                    s.set_status(Status::Idle, now);
+                }
             }
         }
         !pairs.is_empty()
@@ -1339,12 +1345,12 @@ mod tests {
             ClaudeProcess { pid: 7, cwd: r"C:\Projects\pushdocs\".into() },
             ClaudeProcess { pid: 8, cwd: r"c:\projects\PUSHDOCS\".into() },
         ];
-        assert!(st.adopt(&procs, true));
+        assert!(st.adopt(&procs, true, T0 + 10));
         assert_eq!(st.get("new").unwrap().pid, Some(8), "pid 7 already belongs to a live session");
         assert!(st.get("new").unwrap().live);
         assert!(!st.get("old").unwrap().live, "one process, one session: the newest transcript wins");
         assert!(!st.get("gone").unwrap().live, "no process in its directory: stays recent");
-        assert!(!st.adopt(&procs, true), "nothing left to claim");
+        assert!(!st.adopt(&procs, true, T0 + 10), "nothing left to claim");
         assert!(st.remove_dead(|pid| pid != 8), "a claimed session goes with its process");
         assert!(st.get("new").is_none());
     }
@@ -1376,5 +1382,24 @@ mod tests {
         st.resolve("r1", false, T0 + 1);
         assert!(st.remove_dead(alive), "once answered, a dead waiting session goes too");
         assert!(st.get("waiting").is_none());
+    }
+
+    #[test]
+    fn adopting_a_stale_seed_makes_it_idle_and_keeps_it() {
+        let mut st = Store::default();
+        let mut s = Session::new("s1", T0);
+        s.cwd = "/p/x".into();
+        s.first_cwd = Some("/p/x".into());
+        s.status = Status::Stale;
+        s.last_event_at = T0;
+        st.seed(s);
+        let later = T0 + st.stale_after_ms + 60_000;
+        assert!(st.adopt(&[ClaudeProcess { pid: 9, cwd: "/p/x".into() }], false, later));
+        let got = st.get("s1").unwrap();
+        assert!(got.live);
+        assert_eq!(got.status, Status::Idle, "a running process is not stale");
+        assert_eq!(got.last_event_at, later);
+        assert!(!st.tick(later + 1), "the stale timer starts again from the adoption");
+        assert_eq!(st.get("s1").unwrap().status, Status::Idle);
     }
 }

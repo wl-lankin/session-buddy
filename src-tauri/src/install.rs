@@ -122,7 +122,7 @@ pub fn write(install: bool, fingerprint: &str) -> Result<String, String> {
 }
 
 /// Copies sb-relay to its fixed path on launch. Bundled: from the app resources.
-/// `tauri dev`: from target/release next to the workspace.
+/// `tauri dev`: from target/relay (`cargo build --profile relay -p sb-relay`).
 pub fn ensure_relay(app: &AppHandle) {
     let dest = sb_common::relay_path();
     let Some(dir) = dest.parent() else { return };
@@ -137,7 +137,7 @@ pub fn ensure_relay(app: &AppHandle) {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(d) = exe.parent() {
             candidates.push(d.join(&name));
-            candidates.push(d.join("..").join("release").join(&name));
+            candidates.push(d.join("..").join("relay").join(&name));
         }
     }
     let Some(src) = candidates.into_iter().find(|p| p.is_file()) else {

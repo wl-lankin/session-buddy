@@ -9,7 +9,7 @@
     "test": "vitest run",
     "icons": "node scripts/gen-icons.mjs",
     "tauri": "tauri",
-    "prebuild": "cargo build --release -p sb-relay",
+    "prebuild": "cargo build --profile relay -p sb-relay",
     "pack": "tauri build"
   },
   "devDependencies": {

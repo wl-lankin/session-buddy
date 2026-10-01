@@ -12,5 +12,10 @@ license = "MIT"
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
 strip = true
+
+# Only the relay aborts on panic (it must never hang Claude Code); the app unwinds,
+# so a panic in one task does not take the island down. Output: target/relay/.
+[profile.relay]
+inherits = "release"
+panic = "abort"

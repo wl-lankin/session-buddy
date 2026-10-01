@@ -17,7 +17,7 @@ When you run several Claude Code sessions in Warp at once, one of them is always
 - **Answer from the island**: Allow / Deny permission requests, pick `AskUserQuestion` options, reply to a turn that ends in a question.
 - **Plans** from plan mode, shown read-only while Claude Code waits in its own terminal dialog.
 - **Finished sessions** show a short card with how long the turn took and how Claude's last message starts.
-- **5-hour and 7-day limits** with reset times and the logged-in account.
+- **5-hour and 7-day limits** with reset times, per-model weekly limits (for example "7D Fable"), extra usage and the logged-in account.
 - **Never in the way**: Claude Code is never blocked, even when the app is closed.
 - **Buddy**, the little character that shows each session's mood, plus soft sounds (can be turned off).
 
@@ -94,12 +94,12 @@ Claude Code runs a tiny relay, `sb-relay`, for every hook event and as the statu
 
 - **It never blocks Claude Code.** If the app is not running, the relay gives up within 100 ms and prints nothing.
 - Only permission requests, `AskUserQuestion` and a turn that ends in a question wait for your answer (up to 110 s and 9 min). "Answer in terminal", the deadline or a closed connection all fall back to the terminal.
-- **Limits** come from the status-line data when Claude Code provides them, otherwise from Claude Code's own usage endpoint (cached for 10 minutes).
+- **Limits** 5H and 7D come from the status-line data when Claude Code provides them, otherwise from Claude Code's own usage endpoint. The per-model weekly limits and extra usage only exist there, so the endpoint is read every 10 minutes either way.
 
 ## Privacy
 
 - No telemetry, no analytics, no accounts.
-- The only network call is the usage endpoint fallback (`GET https://api.anthropic.com/api/oauth/usage`), with Claude Code's own login token.
+- The only network call is the usage endpoint (`GET https://api.anthropic.com/api/oauth/usage`), with Claude Code's own login token.
 - That token is read fresh each time and never stored or logged.
 - Everything else stays on your machine.
 

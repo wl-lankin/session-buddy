@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, Interaction, Session, Usage } from "../core/types";
+import type { Agent, Extra, Interaction, Session, Usage } from "../core/types";
 import {
   accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue, recentClass,
-  agentGroups, emailParts, finishedAgentLabel, recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, visibleSessions,
+  agentGroups, emailParts, extraView, rowLevel, finishedAgentLabel, recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, visibleSessions,
 } from "./viewmodel";
 
 let n = 0;
@@ -124,7 +124,7 @@ describe("viewmodel", () => {
   });
 
   it("limits and account", () => {
-    const u: Usage = { fiveHour: { usedPct: 42, resetsAt: null }, sevenDay: { usedPct: 91, resetsAt: null }, source: "oauth", updatedAt: 1, error: null, account: { email: "w@x.de", org: "finodata", plan: "Team" } };
+    const u: Usage = { fiveHour: { usedPct: 42, resetsAt: null }, sevenDay: { usedPct: 91, resetsAt: null }, limits: [], extra: null, source: "oauth", updatedAt: 1, error: null, account: { email: "w@x.de", org: "finodata", plan: "Team" } };
     expect(limitsShort(u)).toEqual({ text: "5H 42% · 7D 91%", level: "crit" });
     expect(limitsShort({ ...u, fiveHour: null, sevenDay: null })).toEqual({ text: "", level: "ok" });
     expect(accountLabel(u)).toBe("w@x.de · Team");
@@ -223,5 +223,27 @@ describe("viewmodel", () => {
     expect(answersFor(qs, { "Pick a color?": ["Blue"] }, {})).toBeNull();
     expect(answersFor(qs, { "Pick a color?": ["Blue"], "Which files?": ["a", "b"] }, {})).toEqual({ "Pick a color?": "Blue", "Which files?": "a, b" });
     expect(answersFor(qs, { "Which files?": ["a"] }, { "Pick a color?": "  green  ", "Which files?": "c" })).toEqual({ "Pick a color?": "green", "Which files?": "a, c" });
+  });
+
+  it("row colours follow the percentage or the reported severity, whichever is worse", () => {
+    expect(rowLevel(10, "normal")).toBe("ok");
+    expect(rowLevel(10, undefined)).toBe("ok");
+    expect(rowLevel(75, "normal")).toBe("warn");
+    expect(rowLevel(10, "warning")).toBe("warn");
+    expect(rowLevel(10, "critical")).toBe("crit");
+    expect(rowLevel(95, "warning")).toBe("crit");
+  });
+
+  it("extra usage: with a limit, without one, and off", () => {
+    const on: Extra = { enabled: true, usedMinor: 1240, limitMinor: 5000, currency: "EUR", exponent: 2, disabledReason: null, percent: 24.8 };
+    expect(extraView(on, "en-US")).toEqual({ on: true, text: "€12.40 / €50.00", pct: 24.8, level: "ok" });
+    expect(extraView({ ...on, usedMinor: 4600, percent: 92 }, "en-US")).toMatchObject({ pct: 92, level: "crit" });
+    expect(extraView({ ...on, percent: null }, "en-US")).toMatchObject({ pct: 1240 * 100 / 5000 });
+    expect(extraView({ ...on, limitMinor: null, percent: null }, "en-US")).toEqual({ on: true, text: "€12.40 used", pct: null, level: "ok" });
+    const off: Extra = { ...on, enabled: false, usedMinor: 0, limitMinor: null, percent: null };
+    expect(extraView({ ...off, disabledReason: "out_of_credits" })).toEqual({ on: false, reason: "no credits" });
+    expect(extraView({ ...off, disabledReason: "user_disabled" })).toEqual({ on: false, reason: "turned off" });
+    expect(extraView({ ...off, disabledReason: "plan_not_eligible" })).toEqual({ on: false, reason: "plan not eligible" });
+    expect(extraView(off)).toEqual({ on: false, reason: null });
   });
 });

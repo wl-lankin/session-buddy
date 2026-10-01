@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use sb_core::now_ms;
-use sb_core::usage::{self, Account, Plan, UsageSource};
+use sb_core::usage::{self, Account, UsageSource};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
@@ -74,18 +74,20 @@ pub fn spawn(app: AppHandle) {
             let shared = app.state::<Shared>();
             let rate_limits = shared.hub.store.lock().unwrap().rate_limits.clone();
             let account = tokio::task::spawn_blocking(read_account).await.ok().flatten();
-            match usage::decide(rate_limits.as_ref(), last_fetch, now) {
-                Plan::UseStatusline(v, at) => usage::apply_statusline(&mut shared.usage.lock().unwrap(), &v, at),
-                Plan::Fetch => {
-                    last_fetch = now;
-                    let result = fetch(&client).await;
-                    let mut u = shared.usage.lock().unwrap();
-                    match result {
-                        Ok(v) => usage::apply_oauth(&mut u, &v, now),
-                        Err(e) => usage::apply_error(&mut u, e),
-                    }
+            let plan = usage::decide(rate_limits.as_ref(), last_fetch, now);
+            // The endpoint is the only source of scoped limits and extra usage: fetch it on
+            // its own clock, then let a fresh status line override the 5H / 7D windows.
+            if plan.fetch {
+                last_fetch = now;
+                let result = fetch(&client).await;
+                let mut u = shared.usage.lock().unwrap();
+                match result {
+                    Ok(v) => usage::apply_oauth(&mut u, &v, now),
+                    Err(e) => usage::apply_error(&mut u, e),
                 }
-                Plan::Keep => {}
+            }
+            if let Some((v, at)) = plan.statusline {
+                usage::apply_statusline(&mut shared.usage.lock().unwrap(), &v, at);
             }
             let source = {
                 let mut u = shared.usage.lock().unwrap();

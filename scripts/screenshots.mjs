@@ -102,6 +102,7 @@ async function launch(exe) {
       "--no-first-run",
       "--no-default-browser-check",
       "--mute-audio",
+      "--lang=en-US",
       "--hide-scrollbars",
       "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,

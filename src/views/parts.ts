@@ -4,13 +4,14 @@ import { h, clear, svg } from "./dom";
 import { ICONS } from "./icons";
 import { colorForProject } from "../core/layout";
 import type { Session } from "../core/types";
-import { fmtAdded, fmtRemoved, level } from "../model/format";
+import { fmtAdded, fmtRemoved, level, type Level } from "../model/format";
 import { sessionTitle, statusGlyph } from "../model/viewmodel";
 import { State } from "../core/state";
 
-export function bar(pct: number | null, width = 64): HTMLElement {
+/** A width of 0 leaves the width to CSS. */
+export function bar(pct: number | null, width = 64, lvl: Level = level(pct)): HTMLElement {
   const fill = h("i", { style: `width:${Math.max(0, Math.min(100, pct ?? 0))}%` });
-  return h("span", { class: `bar ${level(pct)}`, style: `width:${width}px` }, fill);
+  return h("span", { class: `bar ${lvl}`, style: width > 0 ? `width:${width}px` : undefined }, fill);
 }
 
 export function statusDot(s: Session): HTMLElement {

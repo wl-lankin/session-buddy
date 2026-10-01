@@ -7,9 +7,9 @@
 import { h } from "./dom";
 import { colorForProject, VIEW_HEIGHT_SESSION } from "../core/layout";
 import { State } from "../core/state";
-import type { Limit, Session, Usage } from "../core/types";
-import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens, level } from "../model/format";
-import { accountTitle, agentGroups, emailParts, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, recentClass, recentCount, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import type { Extra, LimitRow, Session, Usage } from "../core/types";
+import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format";
+import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, recentClass, recentCount, rowLevel, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { accountWidth } from "../model/size";
 import { bar, enlargeButton, keyed, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
@@ -99,28 +99,48 @@ function breakable(text: string): Node[] {
   return [h("span", { class: "a-email-part", text: keep(parts[0]) }), h("wbr"), h("span", { class: "a-email-part", text: keep(parts[1]) })];
 }
 
-function limit(name: string, l: Limit | null, now: number): Node[] {
-  if (!l) return [];
-  const reset = fmtReset(l.resetsAt, now);
+/** One limit row: bar, percentage and the reset time. Scoped rows ("7D Fable") are slightly smaller. */
+function limit(row: LimitRow, now: number): Node[] {
+  const reset = fmtReset(row.resetsAt, now);
+  const scoped = row.kind === "weekly_scoped";
+  const lvl = rowLevel(row.usedPct, row.severity);
   return present([
     h(
       "div",
-      { class: "a-limit" },
-      h("span", { class: "a-name", text: name }),
-      bar(l.usedPct, 62),
-      h("span", { class: `a-pct ${level(l.usedPct)}`, text: `${fmtPct(l.usedPct)}%` }),
+      { class: scoped ? "a-limit scoped" : "a-limit" },
+      h("span", { class: "a-name", text: row.label, title: row.label }),
+      bar(row.usedPct, scoped ? 40 : 62, lvl),
+      h("span", { class: `a-pct ${lvl}`, text: `${fmtPct(row.usedPct)}%` }),
     ),
-    reset ? h("div", { class: "a-reset", text: `resets ${reset}` }) : null,
+    reset ? h("div", { class: scoped ? "a-reset scoped" : "a-reset", text: `resets ${reset}` }) : null,
   ]);
+}
+
+function extraRow(e: Extra): Node[] {
+  const v = extraView(e);
+  if (!v.on) {
+    const text = v.reason ? `Extra usage off - ${v.reason}` : "Extra usage off";
+    return [h("div", { class: "a-extra off", text, title: text })];
+  }
+  return [
+    h(
+      "div",
+      { class: "a-extra" },
+      h("div", { class: "a-extra-head" }, h("span", { class: "a-extra-name", text: "Extra usage" }), v.pct == null ? null : h("span", { class: `a-pct ${v.level}`, text: `${fmtPct(v.pct)}%` })),
+      v.pct == null ? null : bar(v.pct, 0, v.level),
+      h("div", { class: "a-extra-amt", text: v.text, title: v.text }),
+    ),
+  ];
 }
 
 function accountBlock(u: Usage, now: number): Node[] {
   const out: Node[] = [h("div", { class: "x-h", text: "LIMITS" })];
-  if (!u.fiveHour && !u.sevenDay) {
+  if (!u.limits.length) {
     out.push(h("div", { class: "a-na", text: u.error ? "Limits unavailable" : "Limits n/a" }));
     if (u.error) out.push(h("div", { class: "a-error", text: u.error, title: u.error }));
   } else {
-    out.push(...limit("5H", u.fiveHour, now), ...limit("7D", u.sevenDay, now));
+    for (const row of u.limits) out.push(...limit(row, now));
+    if (u.extra) out.push(...extraRow(u.extra));
     if (u.error) {
       const ago = u.updatedAt ? `updated ${fmtAgo(now - u.updatedAt)}` : "not updated";
       out.push(h("div", { class: "a-error", text: ago, title: u.error }));

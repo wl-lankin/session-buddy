@@ -1,8 +1,8 @@
 // Pure functions from sessions to what the island shows. No DOM, no state.
 
 import type { BotStateName } from "../core/layout";
-import type { Agent, Interaction, Question, Session, Status, Usage } from "../core/types";
-import { firstLine, fmtDuration, fmtPct, level, type Level } from "./format";
+import type { Agent, Extra, Interaction, Question, Session, Status, Usage } from "../core/types";
+import { firstLine, fmtDuration, fmtMoney, fmtPct, level, type Level } from "./format";
 
 export const STATUS_RANK: Record<Status, number> = {
   needs_you: 6, error: 5, working: 4, thinking: 3, finished: 2, idle: 1, stale: 0,
@@ -218,4 +218,26 @@ export function answersFor(questions: Question[], picks: Record<string, string[]
     out[q.question] = value;
   }
   return out;
+}
+
+/** A limit row's colour: the worse of its percentage and the severity the endpoint reported. */
+export function rowLevel(pct: number, severity: string | null | undefined): Level {
+  const bySeverity: Level = severity === "critical" ? "crit" : severity === "warning" ? "warn" : "ok";
+  const byPct = level(pct);
+  return byPct === "crit" || bySeverity === "crit" ? "crit" : byPct === "warn" || bySeverity === "warn" ? "warn" : "ok";
+}
+
+const EXTRA_REASONS: Record<string, string> = { out_of_credits: "no credits", user_disabled: "turned off" };
+
+export type ExtraView =
+  | { on: true; text: string; pct: number | null; level: Level }
+  | { on: false; reason: string | null };
+
+/** What the "Extra usage" row shows: "€12.40 / €50.00" with a percentage, "€12.40 used" without a limit, or off with a short reason. */
+export function extraView(e: Extra, locale?: string): ExtraView {
+  if (!e.enabled) return { on: false, reason: e.disabledReason ? (EXTRA_REASONS[e.disabledReason] ?? e.disabledReason.replace(/_/g, " ")) : null };
+  const used = fmtMoney(e.usedMinor, e.currency, e.exponent, locale);
+  if (e.limitMinor == null) return { on: true, text: `${used} used`, pct: null, level: "ok" };
+  const pct = e.percent ?? (e.limitMinor > 0 ? (e.usedMinor * 100) / e.limitMinor : 0);
+  return { on: true, text: `${used} / ${fmtMoney(e.limitMinor, e.currency, e.exponent, locale)}`, pct, level: level(pct) };
 }

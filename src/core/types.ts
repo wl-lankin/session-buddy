@@ -60,10 +60,23 @@ export interface Session {
 }
 
 export interface Limit { usedPct: number; resetsAt: string | number | null }
+export interface LimitRow { kind: string; label: string; usedPct: number; resetsAt: string | number | null; severity: string }
+export interface Extra {
+  enabled: boolean;
+  usedMinor: number;
+  limitMinor: number | null;
+  currency: string;
+  exponent: number;
+  disabledReason: string | null;
+  percent: number | null;
+}
 export interface Account { email: string | null; org: string | null; plan: string | null }
 export interface Usage {
   fiveHour: Limit | null;
   sevenDay: Limit | null;
+  /** Every row of the limits block: 5H, 7D, then the scoped limits ("7D Fable"). */
+  limits: LimitRow[];
+  extra: Extra | null;
   source: "statusline" | "oauth" | "none";
   updatedAt: number | null;
   error: string | null;
@@ -84,6 +97,6 @@ export interface Cue {
 
 export const EMPTY_SNAPSHOT: Snapshot = {
   sessions: [],
-  usage: { fiveHour: null, sevenDay: null, source: "none", updatedAt: null, error: null, account: null },
+  usage: { fiveHour: null, sevenDay: null, limits: [], extra: null, source: "none", updatedAt: null, error: null, account: null },
   now: 0,
 };

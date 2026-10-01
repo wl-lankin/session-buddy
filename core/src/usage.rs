@@ -14,6 +14,30 @@ pub struct Limit {
     pub resets_at: Option<Value>,
 }
 
+/// One row of the limits block: "5H", "7D" or a scoped weekly limit such as "7D Fable".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitRow {
+    pub kind: String,
+    pub label: String,
+    pub used_pct: f64,
+    pub resets_at: Option<Value>,
+    pub severity: String,
+}
+
+/// Extra usage (pay-as-you-go beyond the plan): amounts in minor units of `currency`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Extra {
+    pub enabled: bool,
+    pub used_minor: i64,
+    pub limit_minor: Option<i64>,
+    pub currency: String,
+    pub exponent: u32,
+    pub disabled_reason: Option<String>,
+    pub percent: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
@@ -36,17 +60,22 @@ pub enum UsageSource {
 pub struct Usage {
     pub five_hour: Option<Limit>,
     pub seven_day: Option<Limit>,
+    /// Every row of the limits block in display order: 5H, 7D, then the scoped limits.
+    pub limits: Vec<LimitRow>,
+    pub extra: Option<Extra>,
     pub source: UsageSource,
     pub updated_at: Option<i64>,
     pub error: Option<String>,
     pub account: Option<Account>,
 }
 
+/// What the poll loop does now: apply a fresh status line reading and/or fetch the OAuth endpoint.
+/// The endpoint is fetched every 10 minutes regardless of the status line, because only it
+/// carries the scoped limits and the extra usage.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Plan {
-    UseStatusline(Value, i64),
-    Fetch,
-    Keep,
+pub struct Plan {
+    pub statusline: Option<(Value, i64)>,
+    pub fetch: bool,
 }
 
 pub fn parse_limit(v: &Value) -> Option<Limit> {
@@ -57,6 +86,75 @@ pub fn parse_limit(v: &Value) -> Option<Limit> {
 
 pub fn parse_limits(v: &Value) -> (Option<Limit>, Option<Limit>) {
     (v.get("five_hour").and_then(parse_limit), v.get("seven_day").and_then(parse_limit))
+}
+
+fn row_from(kind: &str, label: String, l: &Limit, severity: &str) -> LimitRow {
+    LimitRow { kind: kind.into(), label, used_pct: l.used_pct, resets_at: l.resets_at.clone(), severity: severity.into() }
+}
+
+/// Reads the OAuth `limits` array. Returns `None` when the response has no such array.
+/// Session and weekly_all rows get their plain labels; a scoped weekly row is labelled
+/// "7D <model>" (or "7D <surface>"). Rows of unknown kinds are skipped.
+pub fn parse_limit_rows(v: &Value) -> Option<Vec<LimitRow>> {
+    let arr = v.get("limits")?.as_array()?;
+    let mut rows = Vec::new();
+    for item in arr {
+        let Some(kind) = item.get("kind").and_then(Value::as_str) else { continue };
+        let Some(pct) = item.get("percent").and_then(Value::as_f64) else { continue };
+        let label = match kind {
+            "session" => "5H".to_string(),
+            "weekly_all" => "7D".to_string(),
+            "weekly_scoped" => {
+                let scope = item.get("scope");
+                let name = |p: &str| scope.and_then(|s| s.pointer(p)).and_then(Value::as_str).filter(|n| !n.is_empty());
+                match name("/model/display_name").or_else(|| name("/surface/display_name")).or_else(|| name("/surface")) {
+                    Some(n) => format!("7D {n}"),
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        let severity = item.get("severity").and_then(Value::as_str).unwrap_or("normal").to_string();
+        let resets_at = item.get("resets_at").filter(|r| !r.is_null()).cloned();
+        rows.push(LimitRow { kind: kind.into(), label, used_pct: pct, resets_at, severity });
+    }
+    Some(rows)
+}
+
+fn minor(v: &Value) -> Option<i64> {
+    v.get("amount_minor").and_then(Value::as_i64).or_else(|| v.as_i64())
+}
+
+fn percent_of(used: i64, limit: Option<i64>) -> Option<f64> {
+    limit.filter(|l| *l > 0).map(|l| used as f64 * 100.0 / l as f64)
+}
+
+/// Extra usage from `spend` (preferred) or the older `extra_usage` object.
+pub fn parse_extra(v: &Value) -> Option<Extra> {
+    if let Some(sp) = v.get("spend").filter(|s| s.get("used").is_some_and(Value::is_object)) {
+        let used = sp.get("used")?;
+        let used_minor = minor(used)?;
+        let limit_minor = sp.get("limit").filter(|l| !l.is_null()).and_then(minor);
+        let currency = used.get("currency").and_then(Value::as_str).unwrap_or("USD").to_string();
+        let exponent = used.get("exponent").and_then(Value::as_u64).unwrap_or(2) as u32;
+        let percent = sp.get("percent").and_then(Value::as_f64).or_else(|| percent_of(used_minor, limit_minor));
+        let disabled_reason = sp.get("disabled_reason").and_then(Value::as_str).map(str::to_string);
+        let enabled = sp.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+        return Some(Extra { enabled, used_minor, limit_minor, currency, exponent, disabled_reason, percent });
+    }
+    let e = v.get("extra_usage").filter(|e| e.is_object())?;
+    let enabled = e.get("is_enabled").and_then(Value::as_bool).unwrap_or(false);
+    let used_minor = e.get("used_credits").and_then(Value::as_f64).map(|c| c.round() as i64).unwrap_or(0);
+    let limit_minor = e.get("monthly_limit").and_then(Value::as_f64).map(|c| c.round() as i64);
+    let currency = e.get("currency").and_then(Value::as_str).unwrap_or("USD").to_string();
+    let exponent = e.get("decimal_places").and_then(Value::as_u64).unwrap_or(2) as u32;
+    let percent = e.get("utilization").and_then(Value::as_f64).or_else(|| percent_of(used_minor, limit_minor));
+    let disabled_reason = e
+        .get("disabled_reason")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| e.get("user_disabled").and_then(Value::as_bool).filter(|d| *d).map(|_| "user_disabled".to_string()));
+    Some(Extra { enabled, used_minor, limit_minor, currency, exponent, disabled_reason, percent })
 }
 
 fn pretty_plan(raw: &str) -> String {
@@ -84,39 +182,78 @@ pub fn token_from_credentials(v: &Value) -> Option<String> {
 }
 
 pub fn decide(rate_limits: Option<&(Value, i64)>, last_fetch: i64, now: i64) -> Plan {
-    if let Some((v, at)) = rate_limits {
-        if now - at < STATUSLINE_FRESH_MS {
-            return Plan::UseStatusline(v.clone(), *at);
-        }
-    }
-    if now - last_fetch >= OAUTH_EVERY_MS { Plan::Fetch } else { Plan::Keep }
+    let statusline = rate_limits.filter(|(_, at)| now - at < STATUSLINE_FRESH_MS).cloned();
+    Plan { statusline, fetch: now - last_fetch >= OAUTH_EVERY_MS }
 }
 
-/// Merges parsed limits into `u`. An empty response is an error and leaves the
-/// previous values untouched; a single present window only replaces its own side.
-fn apply_limits(u: &mut Usage, v: &Value, at: i64, source: UsageSource) {
-    let (f, s) = parse_limits(v);
-    if f.is_none() && s.is_none() {
-        apply_error(u, "usage response had no limits".into());
-        return;
+/// Rebuilds the 5H / 7D rows from the window fields; scoped rows stay where they are.
+fn sync_window_rows(u: &mut Usage) {
+    u.limits.retain(|r| r.kind != "session" && r.kind != "weekly_all");
+    let mut head = Vec::new();
+    if let Some(l) = &u.five_hour {
+        head.push(row_from("session", "5H".into(), l, "normal"));
     }
+    if let Some(l) = &u.seven_day {
+        head.push(row_from("weekly_all", "7D".into(), l, "normal"));
+    }
+    head.append(&mut u.limits);
+    u.limits = head;
+}
+
+fn set_windows(u: &mut Usage, f: Option<Limit>, s: Option<Limit>) {
     if f.is_some() {
         u.five_hour = f;
     }
     if s.is_some() {
         u.seven_day = s;
     }
-    u.source = source;
+    sync_window_rows(u);
+}
+
+/// Status line `rate_limits`: only the 5H and 7D windows. An empty response is an error and
+/// leaves the previous values untouched; a single present window only replaces its own side.
+pub fn apply_statusline(u: &mut Usage, v: &Value, at: i64) {
+    let (f, s) = parse_limits(v);
+    if f.is_none() && s.is_none() {
+        apply_error(u, "usage response had no limits".into());
+        return;
+    }
+    set_windows(u, f, s);
+    u.source = UsageSource::Statusline;
     u.updated_at = Some(at);
     u.error = None;
 }
 
-pub fn apply_statusline(u: &mut Usage, v: &Value, at: i64) {
-    apply_limits(u, v, at, UsageSource::Statusline);
-}
-
+/// OAuth usage response. Scoped limits and extra usage always come from here; the 5H / 7D
+/// windows only when no fresh status line already provides them.
 pub fn apply_oauth(u: &mut Usage, v: &Value, at: i64) {
-    apply_limits(u, v, at, UsageSource::Oauth);
+    let rows = parse_limit_rows(v);
+    let (mut f, mut s) = parse_limits(v);
+    if let Some(rows) = &rows {
+        let pick = |kind: &str| rows.iter().find(|r| r.kind == kind).map(|r| Limit { used_pct: r.used_pct, resets_at: r.resets_at.clone() });
+        f = pick("session").or(f);
+        s = pick("weekly_all").or(s);
+    }
+    let extra = parse_extra(v);
+    let scoped_present = rows.as_ref().is_some_and(|r| r.iter().any(|x| x.kind == "weekly_scoped"));
+    if f.is_none() && s.is_none() && !scoped_present && extra.is_none() {
+        apply_error(u, "usage response had no limits".into());
+        return;
+    }
+    if let Some(rows) = rows {
+        u.limits.retain(|r| r.kind != "weekly_scoped");
+        u.limits.extend(rows.into_iter().filter(|r| r.kind == "weekly_scoped"));
+    }
+    if extra.is_some() {
+        u.extra = extra;
+    }
+    let statusline_fresh = u.source == UsageSource::Statusline && u.updated_at.is_some_and(|t| at - t < STATUSLINE_FRESH_MS);
+    if !statusline_fresh && (f.is_some() || s.is_some()) {
+        set_windows(u, f, s);
+        u.source = UsageSource::Oauth;
+        u.updated_at = Some(at);
+    }
+    u.error = None;
 }
 
 pub fn apply_error(u: &mut Usage, err: String) {
@@ -165,14 +302,15 @@ mod tests {
     }
 
     #[test]
-    fn prefers_fresh_status_line_then_fetches_every_10_minutes() {
+    fn fetches_every_10_minutes_even_with_a_fresh_status_line() {
         let now = 100 * 60_000;
         let rl = (json!({"five_hour": {"used_percentage": 1}}), now - 60_000);
-        assert_eq!(decide(Some(&rl), 0, now), Plan::UseStatusline(rl.0.clone(), rl.1));
+        assert_eq!(decide(Some(&rl), now - OAUTH_EVERY_MS + 1, now), Plan { statusline: Some(rl.clone()), fetch: false });
+        assert_eq!(decide(Some(&rl), now - OAUTH_EVERY_MS, now), Plan { statusline: Some(rl.clone()), fetch: true });
         let old = (rl.0.clone(), now - STATUSLINE_FRESH_MS - 1);
-        assert_eq!(decide(Some(&old), now - OAUTH_EVERY_MS, now), Plan::Fetch);
-        assert_eq!(decide(None, now - OAUTH_EVERY_MS + 1, now), Plan::Keep);
-        assert_eq!(decide(None, i64::MIN / 2, now), Plan::Fetch);
+        assert_eq!(decide(Some(&old), 0, now), Plan { statusline: None, fetch: true });
+        assert_eq!(decide(None, now - OAUTH_EVERY_MS + 1, now), Plan { statusline: None, fetch: false });
+        assert_eq!(decide(None, i64::MIN / 2, now), Plan { statusline: None, fetch: true });
     }
 
     #[test]
@@ -214,5 +352,109 @@ mod tests {
         assert_eq!(u.source, UsageSource::Statusline);
         assert_eq!(u.updated_at, Some(9));
         assert!(u.error.is_none());
+    }
+
+    fn real_response() -> Value {
+        json!({
+            "five_hour": {"utilization": 7.0, "resets_at": "2026-10-01T14:00:00Z", "limit_dollars": null, "locked_reason": null},
+            "seven_day": {"utilization": 30.0, "resets_at": "2026-10-05T00:00:00Z"},
+            "seven_day_opus": null,
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 7, "severity": "normal", "resets_at": "2026-10-01T14:00:00Z", "scope": null, "is_active": true},
+                {"kind": "weekly_all", "group": "weekly", "percent": 30, "severity": "normal", "resets_at": "2026-10-05T00:00:00Z", "scope": null},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 0, "severity": "normal", "resets_at": "2026-10-05T00:00:00Z", "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 12, "severity": "warning", "resets_at": null, "scope": {"model": null, "surface": "Design"}},
+                {"kind": "mystery", "percent": 1}
+            ],
+            "extra_usage": {"is_enabled": false, "monthly_limit": null, "used_credits": 0, "utilization": null, "currency": "EUR", "decimal_places": 2, "disabled_reason": "out_of_credits", "user_disabled": false, "spend_limit_reached": false},
+            "spend": {"used": {"amount_minor": 1240, "currency": "EUR", "exponent": 2}, "limit": {"amount_minor": 5000, "currency": "EUR", "exponent": 2}, "percent": 24.8, "severity": "normal", "enabled": true, "disabled_reason": null, "cap": null, "balance": null}
+        })
+    }
+
+    fn labels(u: &Usage) -> Vec<&str> {
+        u.limits.iter().map(|r| r.label.as_str()).collect()
+    }
+
+    #[test]
+    fn parses_limit_rows_generically() {
+        let rows = parse_limit_rows(&real_response()).unwrap();
+        let names: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(names, ["5H", "7D", "7D Fable", "7D Design"]);
+        assert_eq!(rows[2].used_pct, 0.0);
+        assert_eq!(rows[2].resets_at, Some(json!("2026-10-05T00:00:00Z")));
+        assert_eq!(rows[3].severity, "warning");
+        assert!(rows[3].resets_at.is_none());
+        assert!(parse_limit_rows(&json!({"five_hour": {"utilization": 1}})).is_none());
+    }
+
+    #[test]
+    fn parses_extra_from_spend_then_extra_usage() {
+        let e = parse_extra(&real_response()).unwrap();
+        assert_eq!(
+            e,
+            Extra { enabled: true, used_minor: 1240, limit_minor: Some(5000), currency: "EUR".into(), exponent: 2, disabled_reason: None, percent: Some(24.8) }
+        );
+        let mut only = real_response();
+        only.as_object_mut().unwrap().remove("spend");
+        let e = parse_extra(&only).unwrap();
+        assert!(!e.enabled);
+        assert_eq!((e.used_minor, e.limit_minor, e.percent), (0, None, None));
+        assert_eq!(e.disabled_reason.as_deref(), Some("out_of_credits"));
+        let user = json!({"extra_usage": {"is_enabled": false, "used_credits": 250, "monthly_limit": 1000, "currency": "USD", "decimal_places": 2, "user_disabled": true}});
+        let e = parse_extra(&user).unwrap();
+        assert_eq!((e.disabled_reason.as_deref(), e.percent), (Some("user_disabled"), Some(25.0)));
+        assert!(parse_extra(&json!({"five_hour": null})).is_none());
+    }
+
+    #[test]
+    fn oauth_fills_rows_and_extra() {
+        let mut u = Usage::default();
+        apply_oauth(&mut u, &real_response(), 5);
+        assert_eq!(labels(&u), ["5H", "7D", "7D Fable", "7D Design"]);
+        assert_eq!(u.five_hour.as_ref().unwrap().used_pct, 7.0);
+        assert_eq!(u.source, UsageSource::Oauth);
+        assert_eq!(u.extra.as_ref().unwrap().used_minor, 1240);
+        let v = serde_json::to_value(&u).unwrap();
+        assert_eq!(v["limits"][2]["label"], "7D Fable");
+        assert_eq!(v["extra"]["usedMinor"], 1240);
+    }
+
+    #[test]
+    fn legacy_response_falls_back_to_the_window_fields() {
+        let mut u = Usage::default();
+        apply_oauth(&mut u, &json!({"five_hour": {"utilization": 30}, "seven_day": {"utilization": 10}}), 5);
+        assert_eq!(labels(&u), ["5H", "7D"]);
+        assert!(u.extra.is_none());
+    }
+
+    #[test]
+    fn fresh_status_line_wins_the_windows_but_oauth_adds_scoped_and_extra() {
+        let mut u = Usage::default();
+        apply_statusline(&mut u, &json!({"five_hour": {"used_percentage": 50}, "seven_day": {"used_percentage": 60}}), 100);
+        apply_oauth(&mut u, &real_response(), 200);
+        assert_eq!(u.five_hour.as_ref().unwrap().used_pct, 50.0);
+        assert_eq!(u.seven_day.as_ref().unwrap().used_pct, 60.0);
+        assert_eq!(u.source, UsageSource::Statusline);
+        assert_eq!(u.updated_at, Some(100));
+        let rows: Vec<(&str, f64)> = u.limits.iter().map(|r| (r.label.as_str(), r.used_pct)).collect();
+        assert_eq!(rows, [("5H", 50.0), ("7D", 60.0), ("7D Fable", 0.0), ("7D Design", 12.0)]);
+        assert!(u.extra.is_some());
+        // Once the status line is stale, the endpoint takes over the windows.
+        apply_oauth(&mut u, &real_response(), 100 + STATUSLINE_FRESH_MS);
+        assert_eq!(u.five_hour.as_ref().unwrap().used_pct, 7.0);
+        assert_eq!(u.source, UsageSource::Oauth);
+        // A later status line reading replaces only the windows.
+        apply_statusline(&mut u, &json!({"five_hour": {"used_percentage": 9}}), 100 + STATUSLINE_FRESH_MS + 1);
+        let rows: Vec<(&str, f64)> = u.limits.iter().map(|r| (r.label.as_str(), r.used_pct)).collect();
+        assert_eq!(rows, [("5H", 9.0), ("7D", 30.0), ("7D Fable", 0.0), ("7D Design", 12.0)]);
+    }
+
+    #[test]
+    fn an_error_keeps_scoped_rows_and_extra() {
+        let mut u = Usage::default();
+        apply_oauth(&mut u, &real_response(), 5);
+        apply_error(&mut u, "usage endpoint returned 500".into());
+        assert_eq!(u.limits.len(), 4);
+        assert!(u.extra.is_some());
     }
 }

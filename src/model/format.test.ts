@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstLine, fmtAgo, fmtCountdown, fmtAdded, fmtDuration, fmtLines, fmtRemoved, fmtReset, fmtTokens, level, parseReset } from "./format";
+import { firstLine, fmtAgo, fmtCountdown, fmtAdded, fmtDuration, fmtLines, fmtMoney, fmtRemoved, fmtReset, fmtTokens, level, parseReset } from "./format";
 
 describe("format", () => {
   it("levels at 70 and 90", () => {
@@ -53,5 +53,16 @@ describe("format", () => {
     expect(firstLine("\n\n  Hello there  \nsecond")).toBe("Hello there");
     expect(firstLine("x".repeat(200), 10)).toBe("xxxxxxxxx…");
     expect(firstLine(null)).toBe("");
+  });
+
+});
+
+describe("fmtMoney", () => {
+  it("formats minor units with the currency symbol and the currency's exponent", () => {
+    expect(fmtMoney(1240, "EUR", 2, "en-US")).toBe("€12.40");
+    expect(fmtMoney(5000, "USD", 2, "en-US")).toBe("$50.00");
+    expect(fmtMoney(1240, "EUR", 2, "de-DE").replace(/\s/g, " ")).toBe("12,40 €");
+    expect(fmtMoney(1500, "JPY", 0, "en-US")).toBe("¥1,500");
+    expect(fmtMoney(1240, "not a currency", 2, "en-US")).toBe("12.40 not a currency");
   });
 });

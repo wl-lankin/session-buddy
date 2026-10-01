@@ -63,3 +63,13 @@ export function firstLine(text: string | null | undefined, max = 120): string {
   const line = (text.split(/\r?\n/).find((l) => l.trim()) ?? "").trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
+
+/** An amount in minor units as money in the currency's symbol ("EUR", 1240, 2 -> "€12.40" in en-US). */
+export function fmtMoney(minor: number, currency: string, exponent = 2, locale?: string): string {
+  const amount = minor / 10 ** exponent;
+  try {
+    return new Intl.NumberFormat(locale, { style: "currency", currency, minimumFractionDigits: exponent, maximumFractionDigits: exponent }).format(amount);
+  } catch {
+    return `${amount.toFixed(exponent)} ${currency}`;
+  }
+}

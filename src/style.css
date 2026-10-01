@@ -552,6 +552,16 @@ body {
 .a-pct.warn { color: var(--amber); }
 .a-pct.crit { color: var(--red-text); }
 .a-reset { padding-left: 22px; height: 15px; line-height: 15px; margin-bottom: 6px; font: 400 10.5px var(--font); color: var(--dim-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-limit.scoped { height: 16px; font-size: 10.5px; }
+.a-limit.scoped .a-name { width: auto; flex: 0 1 auto; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
+.a-limit.scoped .bar { flex: 0 0 auto; }
+.a-reset.scoped { padding-left: 0; height: 13px; line-height: 13px; margin-bottom: 4px; font-size: 10px; }
+.a-extra { margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--block-edge); display: flex; flex-direction: column; gap: 3px; }
+.a-extra-head { display: flex; align-items: center; justify-content: space-between; height: 14px; font: 500 11px var(--mono); color: var(--dim); }
+.a-extra-name { font: 700 10px var(--font); color: var(--dim-3); }
+.a-extra .bar { display: block; width: 100%; }
+.a-extra-amt { font: 500 10.5px var(--mono); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-extra.off { margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--block-edge); display: block; font: 400 10.5px var(--font); color: var(--dim-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-na { font: 500 11.5px var(--font); color: var(--dim-2); }
 .a-error {
   margin-top: 3px;

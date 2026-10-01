@@ -123,7 +123,8 @@ fn newest<'a>(it: impl Iterator<Item = &'a Candidate>, rank: impl Fn(&Candidate)
 /// directory encoded (`project_key`); a candidate without a folder uses its first cwd
 /// instead. Among those, one whose cwd or first cwd is exactly that directory comes
 /// first, then the newest transcript.
-/// Pass 2: processes and sessions left over pair on cwd or first cwd, newest first.
+/// Pass 2: processes and sessions left over pair on cwd or first cwd, newest first. Processes
+/// are taken lowest pid first, so the result is the same whatever the order of `procs`.
 /// Each session and each process is used at most once.
 ///
 /// Limits: the key is lossy (`a.b` and `a-b` encode alike, and Claude Code shortens very
@@ -136,9 +137,12 @@ pub fn match_processes(candidates: &[Candidate], procs: &[ClaudeProcess], window
         Some(k) => same_key(k, key, windows),
         None => c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows)),
     };
+    // Lowest pid first in both passes, so the result does not depend on the order of `procs`.
+    let mut procs: Vec<&ClaudeProcess> = procs.iter().collect();
+    procs.sort_by_key(|p| p.pid);
     let mut taken: Vec<&str> = Vec::new();
     let mut out: Vec<(String, u32)> = Vec::new();
-    for p in procs {
+    for p in &procs {
         let key = project_key(&p.cwd);
         let open = candidates.iter().filter(|c| !taken.contains(&c.id.as_str()) && strong(c, p, &key));
         if let Some(c) = newest(open, |c| exact(c, p)) {
@@ -146,7 +150,7 @@ pub fn match_processes(candidates: &[Candidate], procs: &[ClaudeProcess], window
             out.push((c.id.clone(), p.pid));
         }
     }
-    let left: Vec<&ClaudeProcess> = procs.iter().filter(|p| !out.iter().any(|(_, pid)| *pid == p.pid)).collect();
+    let left: Vec<&&ClaudeProcess> = procs.iter().filter(|p| !out.iter().any(|(_, pid)| *pid == p.pid)).collect();
     for p in left {
         let open = candidates.iter().filter(|c| !taken.contains(&c.id.as_str()) && exact(c, p));
         if let Some(c) = newest(open, |_| false) {
@@ -231,6 +235,17 @@ mod tests {
         assert_eq!(match_processes(&c, &[proc_(1, "/p/x")], false), vec![("new".to_string(), 1)]);
         // Two processes in the same directory take the two newest sessions.
         assert_eq!(match_processes(&c, &[proc_(1, "/p/x"), proc_(2, "/p/x")], false), vec![("new".to_string(), 1), ("mid".to_string(), 2)]);
+    }
+
+    #[test]
+    fn leftover_pairing_does_not_depend_on_the_process_order() {
+        // One session whose cwd and first cwd name two different directories where processes run; its folder key matches neither.
+        let mut x = cand("x", Some("/p/a"), "/p/b", 5);
+        x.project_key = Some("zzz".into());
+        let c = [x];
+        let (pa, pb) = (proc_(9, "/p/a"), proc_(3, "/p/b"));
+        assert_eq!(match_processes(&c, &[pa.clone(), pb.clone()], false), vec![("x".to_string(), 3)]);
+        assert_eq!(match_processes(&c, &[pb, pa], false), vec![("x".to_string(), 3)]);
     }
 
     #[test]

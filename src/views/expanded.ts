@@ -176,7 +176,7 @@ function sideCol(actions: ViewActions, s: Session, now: number): Node[] {
         { class: "x-row run" },
         h("span", { class: "x-icon", text: "\u25CF" }),
         h("span", { class: "x-atype", text: a.agentType }),
-        h("span", { class: "x-label", text: a.currentStep ?? a.description ?? "starting", title: a.description ?? undefined }),
+        h("span", { class: "x-label", text: a.currentStep ?? a.description ?? "starting", title: a.currentStep ?? a.description ?? undefined }),
       ),
     );
   }
@@ -225,7 +225,7 @@ function sideCol(actions: ViewActions, s: Session, now: number): Node[] {
           { class: "x-row run" },
           h("span", { class: "x-icon", text: "\u25CF" }),
           h("span", { class: "x-atype", text: b.kind }),
-          h("span", { class: "x-label", text: `${b.description} · ${b.status}` }),
+          h("span", { class: "x-label", text: `${b.description} · ${b.status}`, title: b.description }),
         ),
       );
     }

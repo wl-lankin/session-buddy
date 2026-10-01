@@ -57,6 +57,8 @@ export function buildFinished(actions: ViewActions): ViewHost {
     {
       class: "card wash f-card",
       onclick: () => {
+        // Selecting text in the message is not a click on the card.
+        if (window.getSelection()?.isCollapsed === false) return;
         // Several sessions: each line opens its own; the card itself does nothing.
         if (State.finished.length === 1) actions.openSession(State.finished[0].sessionId);
       },

@@ -19,6 +19,7 @@ pub struct Seed {
     pub cwd: String,
     pub last_prompt: Option<String>,
     pub last_message: Option<String>,
+    pub model: Option<String>,
     pub modified_ms: i64,
 }
 
@@ -37,8 +38,18 @@ fn text_of(content: &Value) -> Option<String> {
     }
 }
 
-pub fn parse_tail(text: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
-    let (mut id, mut cwd, mut prompt, mut message) = (None, None, None, None);
+/// What the tail of a transcript says about its session.
+#[derive(Debug, Default, PartialEq)]
+pub struct Tail {
+    pub id: Option<String>,
+    pub cwd: Option<String>,
+    pub prompt: Option<String>,
+    pub message: Option<String>,
+    pub model: Option<String>,
+}
+
+pub fn parse_tail(text: &str) -> Tail {
+    let (mut id, mut cwd, mut prompt, mut message, mut model) = (None, None, None, None, None);
     for line in text.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         if let Some(s) = v.get("sessionId").and_then(Value::as_str) {
@@ -62,6 +73,9 @@ pub fn parse_tail(text: &str) -> (Option<String>, Option<String>, Option<String>
                 }
             }
             Some("assistant") => {
+                if let Some(m) = v.pointer("/message/model").and_then(Value::as_str).filter(|m| m.starts_with("claude-")) {
+                    model = Some(m.to_string());
+                }
                 if let Some(t) = text_of(content).filter(|t| !t.trim().is_empty()) {
                     message = Some(clip(t.trim(), 2_000));
                 }
@@ -69,7 +83,7 @@ pub fn parse_tail(text: &str) -> (Option<String>, Option<String>, Option<String>
             _ => {}
         }
     }
-    (id, cwd, prompt, message)
+    Tail { id, cwd, prompt, message, model }
 }
 
 fn read_tail(path: &Path) -> Option<String> {
@@ -108,9 +122,9 @@ pub fn scan(projects_dir: &Path, now: i64, max_age_ms: i64) -> Vec<Seed> {
                 continue;
             }
             let Some(text) = read_tail(&path) else { continue };
-            let (id, cwd, last_prompt, last_message) = parse_tail(&text);
+            let Tail { id, cwd, prompt: last_prompt, message: last_message, model } = parse_tail(&text);
             let session_id = id.unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
-            seeds.push(Seed { session_id, cwd: cwd.unwrap_or_default(), last_prompt, last_message, modified_ms: mtime });
+            seeds.push(Seed { session_id, cwd: cwd.unwrap_or_default(), last_prompt, last_message, model, modified_ms: mtime });
         }
     }
     seeds.sort_by_key(|s| s.modified_ms);
@@ -123,6 +137,7 @@ pub fn session_from_seed(seed: &Seed, now: i64, stale_after_ms: i64) -> Session 
     s.project = project_name(&seed.cwd);
     s.last_prompt = seed.last_prompt.clone();
     s.last_message = seed.last_message.clone();
+    s.model = seed.model.clone();
     s.last_event_at = seed.modified_ms;
     s.status = if now - seed.modified_ms >= stale_after_ms { Status::Stale } else { Status::Idle };
     s.status_since = now;
@@ -142,26 +157,26 @@ mod tests {
         lines(&[
             json!({"type":"user","sessionId":"s1","cwd":"C:\\Projects\\pushdocs","message":{"role":"user","content":"<command-name>/clear</command-name>"}}),
             json!({"type":"user","sessionId":"s1","cwd":"C:\\Projects\\pushdocs","message":{"role":"user","content":"fix the DATEV 409 handling"}}),
-            json!({"type":"assistant","sessionId":"s1","message":{"content":[{"type":"tool_use","name":"Read"}]}}),
+            json!({"type":"assistant","sessionId":"s1","message":{"model":"claude-sonnet-4-5","content":[{"type":"tool_use","name":"Read"}]}}),
             json!({"type":"user","sessionId":"s1","message":{"content":[{"type":"tool_result","content":"..."}]}}),
             json!({"type":"user","sessionId":"s1","isMeta":true,"message":{"content":"meta noise"}}),
-            json!({"type":"assistant","sessionId":"s1","message":{"content":[{"type":"text","text":"Fixed. "},{"type":"text","text":"Tests pass."}]}}),
+            json!({"type":"assistant","sessionId":"s1","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"Fixed. "},{"type":"text","text":"Tests pass."}]}}),
         ])
     }
 
     #[test]
     fn parses_last_real_prompt_and_message() {
-        let (id, cwd, prompt, msg) = parse_tail(&transcript());
+        let Tail { id, cwd, prompt, message: msg, model } = parse_tail(&transcript());
         assert_eq!(id.as_deref(), Some("s1"));
         assert_eq!(cwd.as_deref(), Some("C:\\Projects\\pushdocs"));
         assert_eq!(prompt.as_deref(), Some("fix the DATEV 409 handling"));
         assert_eq!(msg.as_deref(), Some("Fixed. Tests pass."));
+        assert_eq!(model.as_deref(), Some("claude-opus-5-5"), "the last assistant message's model wins");
     }
 
     #[test]
     fn ignores_garbage_lines() {
-        let (id, _, _, _) = parse_tail("not json\n{\"broken\":\n");
-        assert!(id.is_none());
+        assert_eq!(parse_tail("not json\n{\"broken\":\n"), Tail::default());
     }
 
     #[test]
@@ -188,10 +203,11 @@ mod tests {
 
     #[test]
     fn seed_becomes_idle_or_stale() {
-        let seed = Seed { session_id: "s1".into(), cwd: "/p/bankconnect".into(), last_prompt: Some("p".into()), last_message: None, modified_ms: 1_000 };
+        let seed = Seed { session_id: "s1".into(), cwd: "/p/bankconnect".into(), last_prompt: Some("p".into()), last_message: None, model: Some("claude-opus-5-5".into()), modified_ms: 1_000 };
         let fresh = session_from_seed(&seed, 1_000 + 60_000, 10 * 60_000);
         assert_eq!(fresh.status, Status::Idle);
         assert_eq!(fresh.project, "bankconnect");
+        assert_eq!(fresh.model.as_deref(), Some("claude-opus-5-5"));
         assert_eq!(fresh.last_event_at, 1_000);
         let old = session_from_seed(&seed, 1_000 + 11 * 60_000, 10 * 60_000);
         assert_eq!(old.status, Status::Stale);

@@ -204,6 +204,13 @@ impl Session {
         }
     }
 
+    /// A denied or interrupted tool never gets a PostToolUse: when the turn ends, whatever is still running failed.
+    fn close_open_steps(&mut self) {
+        for step in self.steps.iter_mut().filter(|x| x.ok.is_none()) {
+            step.ok = Some(false);
+        }
+    }
+
     fn agent_entry(&mut self, id: &str, agent_type: Option<&str>, now: i64) -> &mut Agent {
         if let Some(i) = self.agents.iter().position(|a| a.id == id) {
             if let Some(t) = agent_type {
@@ -290,6 +297,13 @@ impl Store {
             sess.set_status(Status::Idle, now);
         }
 
+        if let Some(m) = s(p, "model").filter(|m| !m.is_empty()) {
+            // A raw id never replaces the status line's display name.
+            if sess.model.as_deref().is_none_or(|cur| cur.starts_with("claude-")) {
+                sess.model = Some(m.to_string());
+            }
+        }
+
         let request_id = s(p, "sb_request_id").map(str::to_string);
         let deadline = now + p.get("sb_wait_ms").and_then(Value::as_i64).unwrap_or(0);
         let agent_id = s(p, "agent_id").map(str::to_string);
@@ -374,6 +388,7 @@ impl Store {
                 }
             }
             "Stop" => {
+                sess.close_open_steps();
                 if let Some(m) = s(p, "last_assistant_message") {
                     sess.last_message = Some(clip(m, 2_000));
                 }
@@ -394,6 +409,7 @@ impl Store {
                 }
             }
             "StopFailure" => {
+                sess.close_open_steps();
                 sess.set_status(Status::Error, now);
                 cue(CueKind::Error);
             }
@@ -651,6 +667,31 @@ mod tests {
         assert!(!st.tick(T0 + 1_000 + FINISHED_TO_IDLE_MS - 1));
         assert!(st.tick(T0 + 1_000 + FINISHED_TO_IDLE_MS));
         assert_eq!(sess(&st).status, Status::Idle);
+    }
+
+    #[test]
+    fn stop_and_stop_failure_close_steps_that_never_completed() {
+        for event in ["Stop", "StopFailure"] {
+            let mut st = Store::default();
+            st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "ls"}})), T0);
+            st.apply_hook(&ev("PostToolUse", json!({"tool_name": "Bash"})), T0 + 1);
+            st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Edit", "tool_input": {"file_path": "a.php"}})), T0 + 2);
+            st.apply_hook(&ev(event, json!({})), T0 + 3);
+            let steps = &sess(&st).steps;
+            assert_eq!(steps[0].ok, Some(true), "{event}: completed steps are untouched");
+            assert_eq!(steps[1].ok, Some(false), "{event}: the denied tool is closed as failed");
+        }
+    }
+
+    #[test]
+    fn hook_model_is_a_fallback_for_the_status_line_name() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("SessionStart", json!({"model": "claude-opus-5-5"})), T0);
+        assert_eq!(sess(&st).model.as_deref(), Some("claude-opus-5-5"));
+        st.apply_statusline(&json!({"session_id": "s1", "model": {"display_name": "Opus 5.5"}}), T0 + 1);
+        assert_eq!(sess(&st).model.as_deref(), Some("Opus 5.5"));
+        st.apply_hook(&ev("UserPromptSubmit", json!({"model": "claude-opus-5-5", "prompt": "x"})), T0 + 2);
+        assert_eq!(sess(&st).model.as_deref(), Some("Opus 5.5"), "the display name always wins");
     }
 
     #[test]

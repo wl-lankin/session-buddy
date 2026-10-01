@@ -530,6 +530,15 @@ impl Store {
         changed
     }
 
+    /// Drops sessions whose Claude Code process has ended (e.g. the terminal tab was closed
+    /// without a SessionEnd). Sessions still waiting for the user stay: the hub resolves those
+    /// when the relay disconnects. Returns true when anything was removed.
+    pub fn remove_dead(&mut self, is_alive: impl Fn(u32) -> bool) -> bool {
+        let before = self.sessions.len();
+        self.sessions.retain(|_, s| !s.pending.is_empty() || s.pid.is_none_or(&is_alive));
+        self.sessions.len() != before
+    }
+
     /// Adds a session found on disk at start-up; never overwrites a live one.
     pub fn seed(&mut self, session: Session) {
         self.sessions.entry(session.id.clone()).or_insert(session);
@@ -940,5 +949,34 @@ mod tests {
         st.seed(Session::new("s1", T0));
         st.apply_statusline(&json!({"session_id": "s1"}), T0 + 1);
         assert!(sess(&st).live);
+    }
+
+    #[test]
+    fn remove_dead_drops_ended_processes_but_not_pending_or_unknown() {
+        let mut st = Store::default();
+        let hook = |id: &str, extra: Value| {
+            let mut v = json!({"hook_event_name": "UserPromptSubmit", "session_id": id, "cwd": "/p/x"});
+            for (k, val) in extra.as_object().unwrap() {
+                v[k] = val.clone();
+            }
+            v
+        };
+        st.apply_hook(&hook("alive", json!({"sb_claude_pid": 1})), T0);
+        st.apply_hook(&hook("dead", json!({"sb_claude_pid": 2})), T0);
+        st.apply_hook(&hook("nopid", json!({})), T0);
+        st.apply_hook(&hook("waiting", json!({"sb_claude_pid": 3})), T0);
+        st.apply_hook(
+            &json!({"hook_event_name": "PermissionRequest", "session_id": "waiting", "tool_name": "Bash", "sb_request_id": "r1", "sb_wait_ms": 1}),
+            T0,
+        );
+        let alive = |pid: u32| pid == 1;
+        assert!(st.remove_dead(alive));
+        let mut ids: Vec<String> = st.snapshot().into_iter().map(|s| s.id).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["alive", "nopid", "waiting"]);
+        assert!(!st.remove_dead(alive), "nothing more to remove");
+        st.resolve("r1", false, T0 + 1);
+        assert!(st.remove_dead(alive), "once answered, a dead waiting session goes too");
+        assert!(st.get("waiting").is_none());
     }
 }

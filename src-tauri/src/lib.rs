@@ -4,6 +4,7 @@ mod install;
 mod ipc;
 mod island;
 mod log;
+mod process;
 mod settings;
 mod tray;
 mod usage_poll;
@@ -242,7 +243,8 @@ fn spawn_loops(app: AppHandle) {
             let todo = {
                 let shared = app.state::<Shared>();
                 let mut st = shared.hub.store.lock().unwrap();
-                if st.tick(now) {
+                let removed = st.remove_dead(process::pid_alive);
+                if st.tick(now) || removed {
                     mark_dirty();
                 }
                 st.sessions_needing_branch(now, 30_000)

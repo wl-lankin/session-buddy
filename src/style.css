@@ -489,6 +489,7 @@ body {
 .x-head { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
 .x-title { display: flex; align-items: center; gap: 6px; min-width: 0; height: 20px; white-space: nowrap; }
 .x-name { font: 600 14px var(--font); color: var(--ink); }
+.claude-mark { color: #d97757; vertical-align: -1px; margin-right: 5px; }
 .x-model { margin-left: auto; padding-left: 10px; flex: 0 1 auto; min-width: 0; font: 500 11.5px var(--font); color: var(--dim-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .x-cwd { font: 400 11px var(--mono); color: var(--dim-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 15px; line-height: 15px; }
 .x-meta { height: 16px; display: flex; align-items: center; gap: 14px; font: 500 11.5px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; }
@@ -727,12 +728,12 @@ body {
 .i-q { display: flex; flex-direction: column; gap: 5px; }
 .i-qtext { font: 600 13px var(--font); color: var(--ink); }
 .chip { align-self: flex-start; font: 700 9.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--cyan); }
-.i-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.i-options { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .opt {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
-  max-width: 260px;
+  min-width: 0;
   padding: 5px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 9px;

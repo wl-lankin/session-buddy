@@ -1,6 +1,7 @@
-// Four sessions that exercise every part of the island.
+// Five sessions that exercise every part of the island, plus the account states
+// the limits block can be in.
 
-import type { Session, Snapshot } from "../src/core/types";
+import type { Session, Snapshot, Usage } from "../src/core/types";
 
 const base = (id: string, project: string, now: number, p: Partial<Session>): Session => ({
   id, project, cwd: `C:\\Projects\\${project}`, branch: null, termProgram: "WarpTerminal", model: "Opus 5.5",
@@ -9,15 +10,28 @@ const base = (id: string, project: string, now: number, p: Partial<Session>): Se
   pending: [], startedAt: now, lastEventAt: now, pid: null, live: true, ...p,
 });
 
+const ACCOUNT = { email: "wolfgang.linz@example-company.de", org: "Example Company GmbH", plan: "Team" };
+
+/** The limits block: fresh values, values kept after a failed refresh, and no values at all. */
+export function demoUsage(now: number, kind: "ok" | "stale" | "error"): Usage {
+  const limits = {
+    fiveHour: { usedPct: 42, resetsAt: now + 3 * 3600_000 },
+    sevenDay: { usedPct: 74, resetsAt: now + 4 * 24 * 3600_000 },
+  };
+  switch (kind) {
+    case "ok":
+      return { ...limits, source: "statusline", updatedAt: now, error: null, account: ACCOUNT };
+    case "stale":
+      return { ...limits, source: "oauth", updatedAt: now - 14 * 60_000, error: "HTTP 429 from the usage endpoint", account: ACCOUNT };
+    case "error":
+      return { fiveHour: null, sevenDay: null, source: "none", updatedAt: null, error: "No OAuth token found in the credentials file", account: null };
+  }
+}
+
 export function demoSnapshot(now: number): Snapshot {
   return {
     now,
-    usage: {
-      fiveHour: { usedPct: 42, resetsAt: now + 3 * 3600_000 },
-      sevenDay: { usedPct: 74, resetsAt: now + 4 * 24 * 3600_000 },
-      source: "statusline", updatedAt: now, error: null,
-      account: { email: "wolfgang@example.com", org: "Personal", plan: "Max" },
-    },
+    usage: demoUsage(now, "ok"),
     sessions: [
       base("a", "pushdocs", now, {
         branch: "PDD-1981", status: "working", statusSince: now - 252_000, lastPrompt: "fix the DATEV 409 handling",
@@ -51,6 +65,24 @@ export function demoSnapshot(now: number): Snapshot {
       base("d", "InvoiceRails", now, {
         status: "finished", lastMessage: "All 312 tests pass. Shall I open the PR?",
         stats: { linesAdded: 12, linesRemoved: 3, contextUsedPct: 93, contextTokens: 186_000, contextSize: 200_000, costUsd: 4.1 },
+      }),
+      // A long project and branch: the branch chip must stay visible while the name shrinks.
+      base("e", "session-buddy-island-redesign-playground", now, {
+        cwd: "C:\\Projects\\session-buddy-island-redesign-playground\\src\\views\\expanded",
+        branch: "SB-1-blocks-with-side-panel-layout", status: "finished", model: "Opus 5.5 (1M context)",
+        lastPrompt: "fix the island layout: this is a long typed prompt that has to end in an ellipsis instead of wrapping onto a second line of the block",
+        lastMessage: "Layout done: tabs, session and account blocks.\nThe branch chip never truncates below 24 characters.\nA third line the card does not show.",
+        steps: [
+          { tool: "Bash", label: "Run · cargo test --workspace", at: now, ok: true },
+          { tool: "Edit", label: "Edit · expanded.ts", at: now, ok: true },
+          { tool: "Edit", label: "Edit · style.css", at: now, ok: true },
+          { tool: "Bash", label: "Run · npx vitest run", at: now, ok: true },
+          { tool: "Bash", label: "Run · npx tsc --noEmit", at: now, ok: true },
+          { tool: "Bash", label: "Run · npm run pack", at: now, ok: false },
+          { tool: "Read", label: "Read · tauri.conf.json", at: now, ok: true },
+        ],
+        agents: [{ id: "ag3", agentType: "general-purpose", description: "Review the diff", running: false, currentStep: null, startedAt: now - 300_000, endedAt: now - 120_000 }],
+        stats: { linesAdded: 11366, linesRemoved: 21, contextUsedPct: 67, contextTokens: 670_000, contextSize: 1_000_000, costUsd: 9.4 },
       }),
     ],
   };

@@ -46,9 +46,20 @@ fn saved_status_line() -> Option<Value> {
     v.get("savedStatusLine").filter(|x| !x.is_null()).cloned()
 }
 
-fn store_saved_status_line(v: Option<&Value>) {
-    let _ = std::fs::create_dir_all(sb_common::config_dir());
-    let _ = std::fs::write(state_path(), json!({"savedStatusLine": v}).to_string());
+fn store_saved_status_line(v: Option<&Value>) -> Result<(), String> {
+    let path = state_path();
+    std::fs::create_dir_all(sb_common::config_dir())
+        .and_then(|_| std::fs::write(&path, json!({"savedStatusLine": v}).to_string()))
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// Installing points Claude Code at the relay, so it has to be in place first.
+fn require_relay(install: bool) -> Result<(), String> {
+    let relay = sb_common::relay_path();
+    if install && !relay.is_file() {
+        return Err(format!("The relay is missing at {}. Restart session-buddy so it can put it there, then install again.", relay.display()));
+    }
+    Ok(())
 }
 
 fn read_current() -> Result<(Vec<u8>, Value), String> {
@@ -82,6 +93,7 @@ pub fn status() -> InstallStatus {
 }
 
 pub fn preview(install: bool) -> Result<InstallPreview, String> {
+    require_relay(install)?;
     let (bytes, current) = read_current()?;
     let (after, _) = next(install, &current);
     Ok(InstallPreview {
@@ -92,15 +104,18 @@ pub fn preview(install: bool) -> Result<InstallPreview, String> {
 }
 
 pub fn write(install: bool, fingerprint: &str) -> Result<String, String> {
+    require_relay(install)?;
     let (_, current) = read_current()?;
     let (after, saved) = next(install, &current);
+    // The user's own status line is saved before settings.json drops it; without it uninstall could not restore it.
+    if let (true, Some(original)) = (install, saved.as_ref()) {
+        store_saved_status_line(Some(original))?;
+    }
     let backup = cs::write_atomic(&settings_path(), &after, fingerprint)?;
-    if install {
-        if let Some(original) = saved {
-            store_saved_status_line(Some(&original));
+    if !install {
+        if let Err(err) = store_saved_status_line(None) {
+            log::line(err);
         }
-    } else {
-        store_saved_status_line(None);
     }
     log::line(format!("settings.json {} (backup {})", if install { "installed" } else { "uninstalled" }, backup.display()));
     Ok(backup.to_string_lossy().to_string())

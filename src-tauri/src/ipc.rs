@@ -9,34 +9,42 @@ use crate::log;
 
 #[cfg(windows)]
 pub fn start(hub: Arc<Hub>) {
-    use tokio::net::windows::named_pipe::ServerOptions;
     tauri::async_runtime::spawn(async move {
         let name = sb_common::pipe_name(&sb_common::user_key());
         // first_pipe_instance: refuse to join a pipe somebody else already owns under our name.
-        let mut server = match ServerOptions::new().first_pipe_instance(true).create(&name) {
-            Ok(s) => s,
-            Err(err) => {
-                log::line(format!("cannot open the relay pipe: {err}"));
-                return;
-            }
-        };
+        let mut server = create_instance(&name, true).await;
         loop {
             if server.connect().await.is_err() {
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                // A failed instance stays failed: replace it. The new one exists before the old
+                // one is dropped, so the name never goes free.
+                server = create_instance(&name, false).await;
                 continue;
             }
-            let next = match ServerOptions::new().create(&name) {
-                Ok(s) => s,
-                Err(err) => {
-                    log::line(format!("cannot reopen the relay pipe: {err}"));
-                    return;
-                }
-            };
+            let next = create_instance(&name, false).await;
             let connected = std::mem::replace(&mut server, next);
             let hub = hub.clone();
             tauri::async_runtime::spawn(async move { hub.serve(connected).await });
         }
     });
+}
+
+/// Creates a pipe instance, retrying every 500 ms until it works. The listener never gives up.
+#[cfg(windows)]
+async fn create_instance(name: &str, first: bool) -> tokio::net::windows::named_pipe::NamedPipeServer {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let mut logged = false;
+    loop {
+        match ServerOptions::new().first_pipe_instance(first).create(name) {
+            Ok(s) => return s,
+            Err(err) => {
+                if !logged {
+                    log::line(format!("cannot open the relay pipe, retrying: {err}"));
+                    logged = true;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
 }
 
 #[cfg(unix)]

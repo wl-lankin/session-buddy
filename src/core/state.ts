@@ -32,7 +32,6 @@ export const DEFAULT_SETTINGS: Settings = {
 
 type Listener = () => void;
 
-const APP_START = Date.now();
 
 class AppState {
   mode: IslandMode = "strip";
@@ -63,11 +62,11 @@ class AppState {
     for (const fn of this.listeners) fn();
   }
 
-  /** Live sessions first, then idle/stale ones; tabs, dots, pager and cycling all use this order. */
+  /** Live sessions first, then recent ones from transcripts; tabs, dots, pager and cycling all use this order. */
   get sessions(): Session[] {
     if (this.orderedFrom !== this.snapshot) {
       this.orderedFrom = this.snapshot;
-      this.ordered = orderSessions(this.snapshot.sessions, APP_START);
+      this.ordered = orderSessions(this.snapshot.sessions);
     }
     return this.ordered;
   }

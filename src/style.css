@@ -130,6 +130,8 @@ body {
   color: var(--ink);
 }
 
+.tab.recent:not(.on) { opacity: 0.5; }
+
 #views {
   position: relative;
   flex: 1 1 auto;
@@ -332,6 +334,7 @@ body {
   opacity: 0.85;
 }
 .sdot.stale, .sdot.idle { opacity: 0.35; }
+.sdot.recent { opacity: 0.15; }
 .sdot.needs_you { animation: sb-pulse 1.1s ease-in-out infinite; }
 .sdot.error { background: var(--red); }
 

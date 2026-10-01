@@ -51,6 +51,10 @@ export interface Session {
   pending: Interaction[];
   startedAt: number;
   lastEventAt: number;
+  /** The Claude Code process behind the session, when the relay reported it. */
+  pid: number | null;
+  /** False for sessions seeded from recent transcripts that have not sent an event yet. */
+  live: boolean;
 }
 
 export interface Limit { usedPct: number; resetsAt: string | number | null }

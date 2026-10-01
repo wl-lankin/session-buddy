@@ -3,7 +3,7 @@
 import { h, clear } from "./dom";
 import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
-import { limitsShort, stripLabel, summarize } from "../model/viewmodel";
+import { limitsShort, recentClass, stripLabel, summarize } from "../model/viewmodel";
 import type { ViewHost } from "./views";
 
 export function buildStrip(): ViewHost {
@@ -17,12 +17,12 @@ export function buildStrip(): ViewHost {
     sync() {
       const sessions = State.sessions;
       label.textContent = stripLabel(summarize(sessions));
-      const key = sessions.map((s) => `${s.id}:${s.status}`).join("|");
+      const key = sessions.map((s) => `${s.id}:${s.status}:${s.live}`).join("|");
       if (key !== dotsKey) {
         dotsKey = key;
         clear(dots);
         for (const s of sessions) {
-          dots.append(h("i", { class: `sdot ${s.status}`, style: `--c:${colorForProject(s.project)}`, title: s.project }));
+          dots.append(h("i", { class: `sdot ${s.status}${recentClass(s)}`, style: `--c:${colorForProject(s.project)}`, title: s.project }));
         }
       }
       const l = limitsShort(State.snapshot.usage);

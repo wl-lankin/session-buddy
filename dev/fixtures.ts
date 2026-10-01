@@ -6,7 +6,7 @@ const base = (id: string, project: string, now: number, p: Partial<Session>): Se
   id, project, cwd: `C:\\Projects\\${project}`, branch: null, termProgram: "WarpTerminal", model: "Opus 5.5",
   status: "idle", statusSince: now, lastPrompt: null, lastMessage: null, steps: [], agents: [], background: [],
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: 12, contextTokens: 24_000, contextSize: 200_000, costUsd: 0.2 },
-  pending: [], startedAt: now, lastEventAt: now, ...p,
+  pending: [], startedAt: now, lastEventAt: now, pid: null, live: true, ...p,
 });
 
 export function demoSnapshot(now: number): Snapshot {

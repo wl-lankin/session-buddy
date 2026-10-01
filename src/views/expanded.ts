@@ -8,7 +8,7 @@ import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
 import type { Limit, Session, Usage } from "../core/types";
 import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format";
-import { accountLabel, accountTitle, modelName, sessionTitle, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import { accountLabel, accountTitle, modelName, recentClass, sessionTitle, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { bar, keyed, linesChanged, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
@@ -23,7 +23,7 @@ function tabs(actions: ViewActions, sessions: Session[], focusId: string | null)
     h(
       "button",
       {
-        class: `tab ${s.status}${s.id === focusId ? " on" : ""}${sessions.length > TAB_COMPACT_ABOVE ? " many" : ""}`,
+        class: `tab ${s.status}${recentClass(s)}${s.id === focusId ? " on" : ""}${sessions.length > TAB_COMPACT_ABOVE ? " many" : ""}`,
         title: `${i + 1}  ${s.project}  ${s.cwd}`,
         onclick: (e: Event) => {
           e.stopPropagation();

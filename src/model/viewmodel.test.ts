@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Interaction, Session, Usage } from "../core/types";
 import {
-  accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue,
+  accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue, recentClass,
   resolveFocus, sessionTitle, statusLine, stripLabel, summarize, tabLabel,
 } from "./viewmodel";
 
@@ -11,7 +11,7 @@ function mk(p: Partial<Session> = {}): Session {
   return {
     id: `s${n}`, project: "pushdocs", cwd: "C:/Projects/pushdocs", branch: null, termProgram: "WarpTerminal",
     model: null, status: "idle", statusSince: 0, lastPrompt: null, lastMessage: null, steps: [], agents: [],
-    background: [], pending: [], startedAt: n, lastEventAt: n,
+    background: [], pending: [], startedAt: n, lastEventAt: n, pid: null, live: true,
     stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: null, contextTokens: null, contextSize: null, costUsd: null },
     ...p,
   };
@@ -35,6 +35,18 @@ describe("viewmodel", () => {
     expect(stripLabel(summarize(one))).toBe("1 session · 1 working");
     const four = [mk({ status: "working" }), mk({ status: "thinking" }), mk({ status: "needs_you" }), mk()];
     expect(stripLabel(summarize(four))).toBe("4 sessions · 2 working · 1 needs you");
+  });
+
+  it("strip counts only live sessions that are not stale", () => {
+    const sessions = [
+      mk({ status: "working" }), mk(), mk({ status: "stale" }),
+      mk({ live: false }), mk({ live: false, status: "stale" }), mk({ status: "thinking" }),
+    ];
+    expect(summarize(sessions)).toEqual({ total: 3, busy: 2, needsYou: 0 });
+    expect(stripLabel(summarize(sessions))).toBe("3 sessions · 2 working");
+    expect(stripLabel(summarize([mk({ live: false }), mk({ live: false })]))).toBe("No sessions");
+    expect(recentClass(mk({ live: false }))).toBe(" recent");
+    expect(recentClass(mk())).toBe("");
   });
 
   it("maps status to Mochi", () => {
@@ -121,24 +133,23 @@ describe("viewmodel", () => {
     expect(accountTitle({ ...u, account: null })).toBe("");
   });
 
-  it("orders live sessions first by start, then idle and stale ones", () => {
-    const APP = 1_000;
-    const idleOld = mk({ status: "idle", startedAt: 1, lastEventAt: 500 });
-    const working = mk({ status: "working", startedAt: 5, lastEventAt: 2_000 });
-    const stale = mk({ status: "stale", startedAt: 2, lastEventAt: 100 });
-    const idleActive = mk({ status: "idle", startedAt: 3, lastEventAt: 1_500 });
-    const waiting = mk({ status: "needs_you", startedAt: 4, lastEventAt: 10 });
+  it("orders live sessions first by start, then recent ones from transcripts", () => {
+    const recentOld = mk({ live: false, status: "idle", startedAt: 1 });
+    const working = mk({ status: "working", startedAt: 5 });
+    const recentStale = mk({ live: false, status: "stale", startedAt: 2 });
+    const idle = mk({ status: "idle", startedAt: 3 });
+    const staleLive = mk({ status: "stale", startedAt: 4 });
     const ids = (xs: Session[]) => xs.map((x) => x.id);
-    expect(ids(orderSessions([idleOld, working, stale, idleActive, waiting], APP))).toEqual(
-      ids([idleActive, waiting, working, idleOld, stale]),
+    expect(ids(orderSessions([recentOld, working, recentStale, idle, staleLive]))).toEqual(
+      ids([idle, staleLive, working, recentOld, recentStale]),
     );
-    expect(ids(orderSessions([], APP))).toEqual([]);
+    expect(ids(orderSessions([]))).toEqual([]);
   });
 
   it("cycling follows the same order as the tabs", () => {
-    const a = mk({ status: "idle", startedAt: 1, lastEventAt: 1 });
-    const b = mk({ status: "working", startedAt: 2, lastEventAt: 5_000 });
-    const ordered = orderSessions([a, b], 1_000);
+    const a = mk({ live: false, startedAt: 1 });
+    const b = mk({ status: "working", startedAt: 2 });
+    const ordered = orderSessions([a, b]);
     expect(cycle(ordered, ordered[0].id, 1)).toBe(a.id);
     expect(cycle(ordered, ordered[0].id, -1)).toBe(a.id);
     expect(ordered[0].id).toBe(b.id);

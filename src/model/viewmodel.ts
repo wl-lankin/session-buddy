@@ -20,11 +20,13 @@ export function loudest(sessions: Session[]): Session | null {
 
 export interface Summary { total: number; busy: number; needsYou: number }
 
+/** Counts the Claude Code sessions actually running: recent ones from transcripts and stale ones are left out. */
 export function summarize(sessions: Session[]): Summary {
+  const counted = sessions.filter((s) => s.live && s.status !== "stale");
   return {
-    total: sessions.length,
-    busy: sessions.filter((s) => s.status === "working" || s.status === "thinking").length,
-    needsYou: sessions.filter((s) => s.status === "needs_you").length,
+    total: counted.length,
+    busy: counted.filter((s) => s.status === "working" || s.status === "thinking").length,
+    needsYou: counted.filter((s) => s.status === "needs_you").length,
   };
 }
 
@@ -156,11 +158,13 @@ export function modelName(raw: string | null): string {
   return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2].replace("-", ".")}`;
 }
 
-/** Live sessions (not idle/stale, or active since the app started) first, each group by start time. */
-export function orderSessions(sessions: Session[], appStart: number): Session[] {
-  const live = (s: Session) => (s.status !== "idle" && s.status !== "stale") || s.lastEventAt > appStart;
-  return [...sessions].sort((a, b) => Number(live(b)) - Number(live(a)) || a.startedAt - b.startedAt);
+/** Live sessions first, then recent ones seeded from transcripts; each group by start time. */
+export function orderSessions(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => Number(b.live) - Number(a.live) || a.startedAt - b.startedAt);
 }
+
+/** Recent sessions (no event since the app started) are shown dimmed. */
+export const recentClass = (s: Session): string => (s.live ? "" : " recent");
 
 /** More sessions than this and inactive tabs shrink to glyph plus three characters. */
 export const TAB_COMPACT_ABOVE = 5;

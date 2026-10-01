@@ -5,7 +5,7 @@
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI } from "../core/bridge";
 import {
-  EXPANDED_CORNER, GREETING_W, PANEL_W, ROUNDED_CORNER, STRIP_W, botGlowColor, botGlowOpacity, botPosition,
+  EXPANDED_CORNER, GREETING_W, PANEL_W, ROUNDED_CORNER, STRIP_H, STRIP_W, botGlowColor, botGlowOpacity, botPosition,
   colorForProject, islandSize, type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
@@ -49,7 +49,7 @@ export class Island {
   private views!: Map<IslandViewName, ViewHost>;
 
   private width = new Tracked(STRIP_W);
-  private height = new Tracked(0);
+  private height = new Tracked(STRIP_H);
   private radius = new Tracked(ROUNDED_CORNER);
   private botCx = new Spring(18);
   private botCy = new Spring(14);
@@ -249,6 +249,13 @@ export class Island {
     this.setKeyboard(true);
   }
 
+  /** After a pin is released with the cursor outside, restart the close timer (nothing else will). */
+  private rearmCollapse() {
+    if (this.wasInIsland) return;
+    this.fsm.mouseLeft();
+    if (this.fsm.state === "home") this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
+  }
+
   private setKeyboard(on: boolean) {
     if (on === this.keyboard) return;
     this.keyboard = on;
@@ -289,6 +296,7 @@ export class Island {
       State.isPinned = false;
       this.fsm.pinned = false;
       this.setKeyboard(false);
+      this.rearmCollapse();
       if (State.mode === "expanded") this.setView(snap.sessions.length ? "session" : "empty");
       else State.view = "session";
     } else if (State.mode === "expanded" && State.view === "empty" && snap.sessions.length) {
@@ -430,19 +438,21 @@ export class Island {
     const inIsland =
       x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
+    // wasInIsland must be current before the FSM runs: its transition handler reads it.
     if (inIsland && !this.wasInIsland) {
+      this.wasInIsland = true;
       Sound.resume();
       if (this.fsm.state === "coucou") this.greeting.hover();
       this.fsm.mouseEntered();
       this.homeCollapseAt = null;
     }
     if (!inIsland && this.wasInIsland) {
+      this.wasInIsland = false;
       this.fsm.mouseLeft();
       if (this.fsm.state === "home" && !State.isPinned) {
         this.homeCollapseAt = performance.now() + State.settings.autoCloseInterval * 1000;
       }
     }
-    this.wasInIsland = inIsland;
 
     const overBot = State.mode === "expanded" && State.stateOverride == null && this.isBotHit(x, y);
     if (overBot && !this.botHovering) this.botHoverIn(x, y);
@@ -565,18 +575,18 @@ export class Island {
     this.updateCountdown(nowMs);
 
     const settling = this.width.animating || this.height.animating || this.radius.animating;
-    const busy =
+    const animating =
       settling || !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-      greetingActive || this.engine.busy || State.flash != null || State.notice != null ||
-      State.mode !== "strip";
+      greetingActive || this.engine.busy || State.flash != null || State.notice != null;
 
-    if (!busy) {
+    if (!animating && State.mode === "strip") {
       this.running = false;
       Sound.idle();
       return;
     }
-    // Mochi breathes forever in the strip; 15 fps is plenty there and keeps CPU near zero.
-    if (State.mode === "strip" && !settling) window.setTimeout(() => requestAnimationFrame(this.frame), 66);
+    // Mochi breathes forever while the island is visible; 15 fps is plenty when nothing is
+    // animating (the countdown bar and the status timer still tick) and keeps CPU low.
+    if (!animating) window.setTimeout(() => requestAnimationFrame(this.frame), 66);
     else requestAnimationFrame(this.frame);
   };
 

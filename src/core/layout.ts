@@ -21,7 +21,9 @@ export const NOTCH_H = 32;
 export const COMPACT_W = 288;
 export const GREETING_W = 640;
 
+/** The strip grows with its label, dots and limits between these widths. */
 export const STRIP_W = 340;
+export const STRIP_MAX_W = 600;
 export const STRIP_H = 28;
 export const COMPACT_ISLAND_W = 480;
 export const COMPACT_H = 64;
@@ -40,10 +42,10 @@ const VIEW_HEIGHTS: Record<IslandViewName, number> = {
   greeting: 150,
 };
 
-export function islandSize(mode: IslandMode, view: IslandViewName, interactionHeight?: number): { w: number; h: number } {
+export function islandSize(mode: IslandMode, view: IslandViewName, interactionHeight?: number, stripWidth?: number): { w: number; h: number } {
   switch (mode) {
     case "strip":
-      return { w: STRIP_W, h: STRIP_H };
+      return { w: Math.max(STRIP_W, Math.min(STRIP_MAX_W, Math.ceil(stripWidth ?? STRIP_W))), h: STRIP_H };
     case "compact":
       return { w: COMPACT_ISLAND_W, h: COMPACT_H };
     case "expanded":

@@ -8,7 +8,7 @@ import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
 import type { Limit, Session, Usage } from "../core/types";
 import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens, level } from "../model/format";
-import { accountTitle, modelName, recentClass, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import { accountTitle, modelName, recentClass, recentCount, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { bar, keyed, linesChanged, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
@@ -18,7 +18,25 @@ const BG_ROWS = 2;
 
 const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
 
-function tabs(actions: ViewActions, sessions: Session[], focusId: string | null): Node[] {
+/** The pill at the end of the tab row that shows or hides the recent sessions. */
+function recentPill(actions: ViewActions, count: number, on: boolean): Node {
+  return h("button", {
+    class: `tab recent-pill${on ? " on" : ""}`,
+    title: on ? "Hide the recent sessions" : "Sessions from the last hours that have sent no event yet",
+    text: `Recent (${count})`,
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      actions.toggleRecent();
+    },
+  });
+}
+
+function tabs(actions: ViewActions, sessions: Session[], focusId: string | null, recent: number): Node[] {
+  const pill = recent ? [recentPill(actions, recent, State.showRecent)] : [];
+  return [...tabButtons(actions, sessions, focusId), ...pill];
+}
+
+function tabButtons(actions: ViewActions, sessions: Session[], focusId: string | null): Node[] {
   return sessions.map((s, i) =>
     h(
       "button",
@@ -198,10 +216,14 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       const s = State.focus;
       const now = Date.now();
       const minute = Math.floor(now / 60_000);
-      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}`).join("|")}#${s?.id ?? ""}`, () => tabs(actions, all, s?.id ?? null));
+      const recent = recentCount(State.allSessions);
+      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}`, () =>
+        tabs(actions, all, s?.id ?? null, recent),
+      );
       keyed(accountEl, JSON.stringify([State.snapshot.usage, minute]), () => accountBlock(State.snapshot.usage, now));
       if (!s) {
-        keyed(headEl, "none", () => [h("div", { class: "x-title" }, h("span", { class: "x-name", text: "No sessions" }))]);
+        const none = State.allSessions.length ? "No live sessions" : "No sessions";
+        keyed(headEl, none, () => [h("div", { class: "x-title" }, h("span", { class: "x-name", text: none }))]);
         keyed(promptEl, "", () => []);
         keyed(stepsEl, "none", () => []);
         keyed(sideEl, "none", () => []);

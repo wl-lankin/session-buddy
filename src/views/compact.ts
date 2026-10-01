@@ -31,7 +31,7 @@ export function buildCompact(actions: ViewActions): ViewHost {
       const s = State.focus;
       const all = State.sessions;
       if (!s) {
-        keyed(title, "none", () => [document.createTextNode("No sessions yet")]);
+        keyed(title, "none", () => [document.createTextNode(State.allSessions.length ? "No live sessions" : "No sessions yet")]);
         lines.replaceChildren();
         ctx.textContent = "";
         pager.style.display = "none";

@@ -21,12 +21,15 @@ export interface ViewActions {
   wantKeyboard(on: boolean): void;
   /** Content height changed: re-run the island geometry. */
   relayout(): void;
+  /** The "Recent" pill: show or hide the recent sessions in the tab row. */
+  toggleRecent(): void;
 }
 
 export interface ViewHost {
   el: HTMLElement;
   sync(): void;
   tick?(nowMs: number): void;
+  /** Natural size of the content: height for the interaction card, width for the strip. */
   measure?(): number;
   /** Return true when the key was handled. */
   key?(e: KeyboardEvent): boolean;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Interaction, Session, Usage } from "../core/types";
 import {
   accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue, recentClass,
-  resolveFocus, sessionTitle, statusLine, stripLabel, summarize, tabLabel,
+  recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, tabLabel, visibleSessions,
 } from "./viewmodel";
 
 let n = 0;
@@ -144,6 +144,29 @@ describe("viewmodel", () => {
       ids([idle, staleLive, working, recentOld, recentStale]),
     );
     expect(ids(orderSessions([]))).toEqual([]);
+  });
+
+  it("visible sessions: live only, recent ones at the end when asked for", () => {
+    const recent = mk({ live: false, startedAt: 1 });
+    const working = mk({ status: "working", startedAt: 3 });
+    const staleLive = mk({ status: "stale", startedAt: 2 });
+    const ordered = orderSessions([recent, working, staleLive]);
+    const ids = (xs: Session[]) => xs.map((x) => x.id);
+    expect(ids(visibleSessions(ordered, false))).toEqual([staleLive.id, working.id]);
+    expect(ids(visibleSessions(ordered, true))).toEqual([staleLive.id, working.id, recent.id]);
+    expect(visibleSessions([], true)).toEqual([]);
+    expect(recentCount(ordered)).toBe(1);
+    expect(recentCount([working])).toBe(0);
+  });
+
+  it("cycling and number keys skip recent sessions unless they are shown", () => {
+    const recent = mk({ live: false, startedAt: 1 });
+    const a = mk({ status: "working", startedAt: 2 });
+    const b = mk({ status: "idle", startedAt: 3 });
+    const shown = visibleSessions(orderSessions([recent, a, b]), false);
+    expect(cycle(shown, b.id, 1)).toBe(a.id);
+    expect(cycle(shown, a.id, -1)).toBe(b.id);
+    expect(shown[2]).toBeUndefined();
   });
 
   it("cycling follows the same order as the tabs", () => {

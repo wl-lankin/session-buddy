@@ -78,6 +78,8 @@ export class Island {
   private prevViewBeforeConfused: IslandViewName = "session";
 
   private acked = new Set<string>();
+  /** The strip's natural width (label, dots and limits), clamped in islandSize. */
+  private stripW = STRIP_W;
   private lastWheel = 0;
   private keyboard = false;
 
@@ -121,6 +123,11 @@ export class Island {
       openSettings: () => void Bridge.openSettingsWindow(),
       wantKeyboard: (on) => this.setKeyboard(on),
       relayout: () => this.animateGeometry(false),
+      toggleRecent: () => {
+        State.showRecent = !State.showRecent;
+        Sound.play("blip");
+        State.notify();
+      },
     };
   }
 
@@ -188,7 +195,8 @@ export class Island {
   private defaultView(): IslandViewName {
     if (pendingQueue(State.sessions, State.focusId).length) return "interaction";
     if (planSession(State.sessions, State.focusId)) return "plan";
-    return State.sessions.length ? "session" : "empty";
+    // Recent sessions alone still open the session view: its "Recent" pill shows them.
+    return State.allSessions.length ? "session" : "empty";
   }
 
   // -- Mode / view ----------------------------------------------------------
@@ -200,6 +208,7 @@ export class Island {
     if (mode === "expanded") Sound.play("open");
     if (prev === "expanded") {
       Sound.play("close");
+      State.showRecent = false;
       State.isPinned = false;
       this.fsm.pinned = false;
       this.setKeyboard(false);
@@ -296,9 +305,9 @@ export class Island {
   // -- Data from Rust -------------------------------------------------------
 
   onSnapshot(snap: Snapshot) {
-    const prev = State.snapshot.sessions;
+    const prev = State.sessions;
     State.snapshot = snap;
-    const { focusId, newlyPending } = resolveFocus(State.focusId, prev, snap.sessions);
+    const { focusId, newlyPending } = resolveFocus(State.focusId, prev, State.sessions);
     State.focusId = focusId;
     const planned = newPlan(prev, snap.sessions);
 
@@ -410,7 +419,7 @@ export class Island {
   // -- Geometry -------------------------------------------------------------
 
   private targetSize(): { w: number; h: number; r: number } {
-    const { w, h } = islandSize(State.mode, State.view, this.views.get("interaction")?.measure?.());
+    const { w, h } = islandSize(State.mode, State.view, this.views.get("interaction")?.measure?.(), this.stripW);
     return { w, h, r: State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER };
   }
 
@@ -737,7 +746,13 @@ export class Island {
 
     this.strip.el.classList.toggle("on", State.mode === "strip");
     this.compact.el.classList.toggle("on", State.mode === "compact");
-    if (State.mode === "strip") this.strip.sync();
+    // Always kept current: its width decides the strip's size before the island shrinks to it.
+    this.strip.sync();
+    const stripW = this.strip.measure?.() ?? STRIP_W;
+    if (Math.abs(stripW - this.stripW) > 0.5) {
+      this.stripW = stripW;
+      if (State.mode === "strip") this.animateGeometry(false);
+    }
     if (State.mode === "compact") this.compact.sync();
 
     for (const [name, view] of this.views) {

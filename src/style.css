@@ -443,6 +443,8 @@ body {
 .x-tabs .tab.on { background: var(--tab-on); color: var(--ink); flex: 0 0 auto; max-width: 180px; }
 .x-tabs .tab.many:not(.on) { padding: 0 7px; gap: 4px; max-width: 56px; }
 .x-tabs .tab:hover { color: var(--ink-2); }
+.x-tabs .recent-pill { flex: 0 0 auto; max-width: none; margin-left: auto; padding: 0 8px; font-size: 10.5px; color: var(--dim-3); background: rgba(255, 255, 255, 0.04); }
+.x-tabs .recent-pill.on { background: rgba(255, 255, 255, 0.09); color: var(--dim); }
 .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .x-main { display: grid; grid-template-columns: minmax(0, 1fr) 150px; grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }

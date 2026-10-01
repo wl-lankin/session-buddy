@@ -2,7 +2,7 @@
 
 import type { BotStateName, IslandMode, IslandViewName } from "./layout";
 import { EMPTY_SNAPSHOT, type Session, type Snapshot } from "./types";
-import { botStateFor, loudest, orderSessions } from "../model/viewmodel";
+import { botStateFor, loudest, orderSessions, visibleSessions } from "../model/viewmodel";
 import type { FinishItem, FinishStyle } from "../model/finish";
 
 export interface Settings {
@@ -53,6 +53,8 @@ class AppState {
   flash: { sessionId: string; until: number } | null = null;
   /** What the finished card lists, oldest first. */
   finished: FinishItem[] = [];
+  /** The "Recent" pill: recent sessions join the tab row until the island collapses. */
+  showRecent = false;
   /** Short message on the interaction card, e.g. when an answer arrived too late. */
   notice: { text: string; until: number } | null = null;
   lastActivity = performance.now();
@@ -71,13 +73,18 @@ class AppState {
     for (const fn of this.listeners) fn();
   }
 
-  /** Live sessions first, then recent ones from transcripts; tabs, dots, pager and cycling all use this order. */
-  get sessions(): Session[] {
+  /** Every session: live ones first, then recent ones from transcripts. */
+  get allSessions(): Session[] {
     if (this.orderedFrom !== this.snapshot) {
       this.orderedFrom = this.snapshot;
       this.ordered = orderSessions(this.snapshot.sessions);
     }
     return this.ordered;
+  }
+
+  /** What tabs, dots, pager, cycling and number keys show: live sessions, plus recent ones while the pill is on. */
+  get sessions(): Session[] {
+    return visibleSessions(this.allSessions, this.showRecent && this.mode === "expanded");
   }
 
   get focus(): Session | null {

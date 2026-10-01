@@ -163,6 +163,17 @@ export function orderSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => Number(b.live) - Number(a.live) || a.startedAt - b.startedAt);
 }
 
+/**
+ * What the tab row, strip dots, compact pager, cycling and number keys show: the live sessions,
+ * plus the recent ones (seeded from transcripts) when the "Recent" pill is on. `sessions` comes
+ * ordered live first, so the recent ones stay at the end.
+ */
+export function visibleSessions(sessions: Session[], showRecent: boolean): Session[] {
+  return showRecent ? sessions : sessions.filter((s) => s.live);
+}
+
+export const recentCount = (sessions: Session[]): number => sessions.filter((s) => !s.live).length;
+
 /** Recent sessions (no event since the app started) are shown dimmed. */
 export const recentClass = (s: Session): string => (s.live ? "" : " recent");
 

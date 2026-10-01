@@ -33,6 +33,8 @@ impl WaitKind {
 /// The three cases where a human can answer from the island. Everything else is fire-and-forget.
 pub fn wait_kind(payload: &Value) -> Option<WaitKind> {
     match payload.get("hook_event_name")?.as_str()? {
+        // Claude Code ignores a hook "allow" for ExitPlanMode and shows its own plan dialog anyway.
+        "PermissionRequest" if payload.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") => None,
         "PermissionRequest" => Some(WaitKind::Permission),
         "PreToolUse" if payload.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion") => {
             Some(WaitKind::Question)
@@ -121,6 +123,16 @@ mod tests {
         assert_eq!(wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"Done."})), None);
         assert_eq!(wait_kind(&json!({"hook_event_name":"Stop"})), None);
         assert_eq!(wait_kind(&json!({"hook_event_name":"SessionStart"})), None);
+    }
+
+    #[test]
+    fn exit_plan_mode_never_blocks() {
+        // Claude Code ignores a hook "allow" for ExitPlanMode and keeps its own plan dialog.
+        assert_eq!(wait_kind(&json!({"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode"})), None);
+        assert_eq!(
+            wait_kind(&json!({"hook_event_name":"PermissionRequest","tool_name":"Bash"})),
+            Some(WaitKind::Permission)
+        );
     }
 
     #[test]

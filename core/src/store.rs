@@ -126,6 +126,8 @@ pub struct Session {
     /// When the current turn started (prompt, or the first work event when the prompt was not seen).
     #[serde(skip)]
     pub turn_started_at: Option<i64>,
+    /// The plan Claude Code is asking to approve (ExitPlanMode). Answered only in the terminal.
+    pub plan: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -205,6 +207,7 @@ impl Session {
             first_cwd: None,
             toplevel_checked: false,
             turn_started_at: None,
+            plan: None,
         }
     }
 
@@ -353,6 +356,8 @@ impl Store {
         let empty = Value::Object(Default::default());
         let input = p.get("tool_input").unwrap_or(&empty);
         let is_agent_tool = tool == "Agent" || tool == "Task";
+        let is_plan = tool == "ExitPlanMode";
+        let plan_text = s(input, "plan").map(|t| clip(t, 8_000));
 
         let mut cues = Vec::new();
         let mut finished_turn = None;
@@ -366,6 +371,7 @@ impl Store {
                     sess.last_prompt = Some(clip(t, 300));
                 }
                 sess.turn_started_at = Some(now);
+                sess.plan = None;
                 sess.set_status(Status::Thinking, now);
             }
             "PreToolUse" if tool == "AskUserQuestion" => {
@@ -376,7 +382,12 @@ impl Store {
                     cue(CueKind::Approval);
                 }
             }
+            // The terminal shows its own plan dialog; the island only shows the plan.
+            "PreToolUse" if is_plan && agent_id.is_none() => sess.plan = plan_text.or(Some(String::new())),
             "PreToolUse" => {
+                if agent_id.is_none() {
+                    sess.plan = None;
+                }
                 let label = step_label(&tool, input);
                 match &agent_id {
                     Some(aid) => {
@@ -396,6 +407,9 @@ impl Store {
                 sess.set_status(Status::Working, now);
             }
             "PostToolUse" | "PostToolUseFailure" => {
+                if is_plan {
+                    sess.plan = None;
+                }
                 if agent_id.is_none() {
                     sess.finish_step(&tool, event == "PostToolUse");
                 }
@@ -412,6 +426,7 @@ impl Store {
                     sess.set_status(Status::Working, now);
                 }
             }
+            "PermissionRequest" if is_plan && request_id.is_none() => sess.plan = plan_text.or(Some(String::new())),
             "PermissionRequest" => {
                 if let Some(request_id) = request_id {
                     sess.pending.push_back(Interaction::Approval {
@@ -432,6 +447,7 @@ impl Store {
                 }
             }
             "Stop" => {
+                sess.plan = None;
                 sess.close_open_steps();
                 if let Some(m) = s(p, "last_assistant_message") {
                     sess.last_message = Some(clip(m, 2_000));
@@ -454,6 +470,7 @@ impl Store {
                 }
             }
             "StopFailure" => {
+                sess.plan = None;
                 sess.close_open_steps();
                 sess.set_status(Status::Error, now);
                 cue(CueKind::Error);
@@ -1053,6 +1070,55 @@ mod tests {
         st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "two"})), T0 + 50_000);
         let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 53_000);
         assert_eq!(cues[0].turn_ms, Some(3_000));
+    }
+
+    #[test]
+    fn exit_plan_mode_shows_the_plan_without_a_pending_card() {
+        let plan_ev = |event: &str| ev(event, json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "## Plan\n- step one"}}));
+        for event in ["PreToolUse", "PermissionRequest"] {
+            let mut st = Store::default();
+            st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "plan it"})), T0);
+            let cues = st.apply_hook(&plan_ev(event), T0 + 1);
+            assert!(cues.is_empty(), "{event}: no approval cue, nothing to answer");
+            let s = sess(&st);
+            assert_eq!(s.plan.as_deref(), Some("## Plan\n- step one"), "{event}");
+            assert!(s.pending.is_empty(), "{event}");
+            assert!(s.steps.is_empty(), "{event}: not a step");
+            assert_eq!(s.status, Status::Thinking, "{event}: status stays");
+        }
+    }
+
+    #[test]
+    fn the_plan_clears_on_the_next_prompt_tool_or_stop() {
+        let clear_by = [
+            ev("UserPromptSubmit", json!({"prompt": "go on"})),
+            ev("PreToolUse", json!({"tool_name": "Edit", "tool_input": {"file_path": "a.rs"}})),
+            ev("Stop", json!({})),
+            ev("PostToolUse", json!({"tool_name": "ExitPlanMode"})),
+        ];
+        for next in clear_by {
+            let mut st = Store::default();
+            st.apply_hook(&ev("PreToolUse", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "x"}})), T0);
+            assert!(sess(&st).plan.is_some());
+            st.apply_hook(&next, T0 + 1);
+            assert_eq!(sess(&st).plan, None, "{}", next["hook_event_name"]);
+        }
+        // Another session's or a sub-agent's events do not clear it; a long plan is clipped.
+        let mut st = Store::default();
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "y".repeat(9_000)}})), T0);
+        assert_eq!(sess(&st).plan.as_ref().unwrap().chars().count(), 8_000);
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Read", "agent_id": "ag1"})), T0 + 1);
+        assert!(sess(&st).plan.is_some(), "sub-agent tools leave the plan alone");
+        let v = serde_json::to_value(st.snapshot()).unwrap();
+        assert!(v[0]["plan"].is_string());
+    }
+
+    #[test]
+    fn exit_plan_mode_from_an_old_blocking_relay_still_queues() {
+        let mut st = Store::default();
+        let cues = st.apply_hook(&ev("PermissionRequest", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "x"}, "sb_request_id": "r1", "sb_wait_ms": 1})), T0);
+        assert_eq!(cues[0].kind, CueKind::Approval);
+        assert_eq!(sess(&st).pending.len(), 1);
     }
 
     #[test]

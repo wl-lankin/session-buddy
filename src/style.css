@@ -611,3 +611,30 @@ body {
 .grow { flex: 1 1 auto; }
 .btn.danger { background: rgba(244, 80, 94, 0.16); color: var(--red-text); }
 .btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Plan ready (answered in the terminal) ───────────────────────────── */
+.plan-view { display: flex; flex-direction: column; gap: 8px; height: 100%; }
+.p-plan {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--block);
+  border: 1px solid var(--block-edge);
+  font: 400 12.5px/1.45 var(--font);
+  color: var(--ink-2);
+  user-select: text;
+}
+.p-hint { flex: 0 0 auto; font: 500 11.5px var(--font); color: var(--amber); opacity: 0.9; padding: 0 2px 2px; }
+.md-h { font-weight: 700; color: var(--ink); margin: 6px 0 3px; }
+.md-h:first-child { margin-top: 0; }
+.md-h1 { font-size: 14px; }
+.md-h2 { font-size: 13px; }
+.md-h3 { font-size: 12.5px; }
+.md-p { margin: 2px 0; }
+.md-li { display: flex; gap: 7px; margin: 1px 0; }
+.md-bullet { flex: 0 0 auto; min-width: 10px; color: var(--dim-3); font-variant-numeric: tabular-nums; }
+.md-li-text { min-width: 0; }
+.md-code, .md-code-inline { font-family: var(--mono); font-size: 11.5px; color: #e8e9ec; background: rgba(255, 255, 255, 0.06); border-radius: 6px; }
+.md-code-inline { padding: 0 4px; }
+.md-code { margin: 4px 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -6,6 +6,8 @@ use serde_json::Value;
 use crate::output::{wait_kind, WaitKind};
 
 const MAX_FIELD_LEN: usize = 2_000;
+/// ExitPlanMode's plan is shown on the island, so it may be longer than other fields.
+const MAX_PLAN_LEN: usize = 8_000;
 
 /// Finding the Claude Code process costs about 15 ms on Windows, so only the
 /// events that start, prompt and end a turn carry it (the status line does too).
@@ -68,22 +70,33 @@ pub fn prepare(
             fmap.insert("sb_claude_pid".into(), Value::from(pid));
         }
     }
+    let plan = if fwd.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") {
+        fwd.pointer_mut("/tool_input/plan").map(Value::take)
+    } else {
+        None
+    };
     truncate_strings(&mut fwd);
+    if let (Some(Value::String(p)), Some(input)) = (plan, fwd.get_mut("tool_input").and_then(Value::as_object_mut)) {
+        input.insert("plan".into(), Value::String(cap(p, MAX_PLAN_LEN)));
+    }
 
     let mut line = fwd.to_string();
     line.push('\n');
     Some(Prepared { line, original, wait })
 }
 
+fn cap(s: String, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s;
+    }
+    let cut: String = s.chars().take(max).collect();
+    cut + "\u{2026}"
+}
+
 /// Caps every string. A single Write can carry a whole file.
 pub fn truncate_strings(value: &mut Value) {
     match value {
-        Value::String(s) => {
-            if s.chars().count() > MAX_FIELD_LEN {
-                let cut: String = s.chars().take(MAX_FIELD_LEN).collect();
-                *s = cut + "\u{2026}";
-            }
-        }
+        Value::String(s) => *s = cap(std::mem::take(s), MAX_FIELD_LEN),
         Value::Array(items) => items.iter_mut().for_each(truncate_strings),
         Value::Object(map) => map.values_mut().for_each(truncate_strings),
         _ => {}
@@ -140,6 +153,20 @@ mod tests {
         let forwarded = fwd(&p)["tool_input"]["questions"][0]["question"].as_str().unwrap().to_string();
         assert!(forwarded.chars().count() <= MAX_FIELD_LEN + 1);
         assert_eq!(p.original["tool_input"]["questions"][0]["question"].as_str().unwrap().len(), 5_000);
+    }
+
+    #[test]
+    fn exit_plan_mode_keeps_a_longer_plan() {
+        let raw = serde_json::to_vec(&json!({
+            "hook_event_name":"PreToolUse","tool_name":"ExitPlanMode",
+            "tool_input":{"plan": "p".repeat(10_000), "other": "o".repeat(5_000)}
+        })).unwrap();
+        let v = fwd(&prepare(&raw, "", "", "", no_pid).unwrap());
+        assert_eq!(v["tool_input"]["plan"].as_str().unwrap().chars().count(), MAX_PLAN_LEN + 1);
+        assert_eq!(v["tool_input"]["other"].as_str().unwrap().chars().count(), MAX_FIELD_LEN + 1);
+        let raw = serde_json::to_vec(&json!({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"plan": "p".repeat(5_000)}})).unwrap();
+        let v = fwd(&prepare(&raw, "", "", "", no_pid).unwrap());
+        assert_eq!(v["tool_input"]["plan"].as_str().unwrap().chars().count(), MAX_FIELD_LEN + 1, "only ExitPlanMode");
     }
 
     #[test]

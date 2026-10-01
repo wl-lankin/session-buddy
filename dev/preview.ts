@@ -1,7 +1,8 @@
 // Drives the island with fake sessions: steps keep arriving, answers remove
 // their card, the limits block cycles through ok / stale / error every 10 s.
 // Finishes: one session at 9 s (single card), three in a row every 20 s (one
-// merged card). The waiting cards arrive at 30 s; while they wait, finishes
+// merged card). A plan (ExitPlanMode, answered only in the terminal) shows from
+// 13 s to 19 s. The waiting cards arrive at 30 s; while they wait, finishes
 // only flash and never cover them.
 
 import type { Snapshot } from "../src/core/types";
@@ -19,6 +20,25 @@ const full = demoSnapshot(Date.now());
 let snap: Snapshot = { ...full, sessions: full.sessions.map((s) => (s.pending.length ? { ...s, pending: [], status: "working" } : s)) };
 const push = () => sb.snapshot({ ...snap, now: Date.now() });
 push();
+
+const PLAN = [
+  "## Plan: fix the DATEV 409 handling",
+  "",
+  "1. Treat `KeyConflictFault` as success: the GUID was **already used**.",
+  "2. Add a Pest test for the 409 path",
+  "   - fake the gateway response",
+  "   - assert no retry is queued",
+  "",
+  "```",
+  "php artisan test --filter Datev",
+  "```",
+].join("\n");
+const setPlan = (plan: string | null) => {
+  snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === "a" ? { ...s, plan } : s)) };
+  push();
+};
+setTimeout(() => setPlan(PLAN), 13_000);
+setTimeout(() => setPlan(null), 19_000);
 
 setTimeout(() => {
   const waiting = new Map(full.sessions.filter((s) => s.pending.length).map((s) => [s.id, s]));

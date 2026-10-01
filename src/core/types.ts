@@ -55,6 +55,8 @@ export interface Session {
   pid: number | null;
   /** False for sessions seeded from recent transcripts that have not sent an event yet. */
   live: boolean;
+  /** The plan waiting in Claude Code's own terminal dialog (ExitPlanMode); "" when its text is unknown. */
+  plan: string | null;
 }
 
 export interface Limit { usedPct: number; resetsAt: string | number | null }

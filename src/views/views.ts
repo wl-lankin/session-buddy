@@ -5,6 +5,7 @@ import type { IslandViewName } from "../core/layout";
 import { buildSessionView } from "./expanded";
 import { buildInteraction } from "./cards";
 import { buildFinished } from "./finished";
+import { buildPlan } from "./plan";
 
 export interface ViewActions {
   focus(id: string): void;
@@ -40,6 +41,7 @@ export function buildViews(actions: ViewActions): Map<IslandViewName, ViewHost> 
   return new Map<IslandViewName, ViewHost>([
     ["session", buildSessionView(actions)],
     ["interaction", buildInteraction(actions)],
+    ["plan", buildPlan()],
     ["finished", buildFinished(actions)],
     ["empty", simple("empty-view", "No Claude Code sessions yet", "Start claude in Warp or any terminal. Sessions appear here on their first event.")],
     ["confused", simple("confused-view", "Ouch.", "Give Mochi a second.")],

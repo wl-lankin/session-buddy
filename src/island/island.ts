@@ -14,6 +14,7 @@ import type { Cue, CueKind, Snapshot } from "../core/types";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
 import { FINISH_CARD_S, mergeFinish, planFinish, type FinishItem } from "../model/finish";
+import { newPlan, planSession } from "../model/plan";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
@@ -185,6 +186,7 @@ export class Island {
 
   private defaultView(): IslandViewName {
     if (pendingQueue(State.sessions, State.focusId).length) return "interaction";
+    if (planSession(State.sessions, State.focusId)) return "plan";
     return State.sessions.length ? "session" : "empty";
   }
 
@@ -291,6 +293,7 @@ export class Island {
     State.snapshot = snap;
     const { focusId, newlyPending } = resolveFocus(State.focusId, prev, snap.sessions);
     State.focusId = focusId;
+    const planned = newPlan(prev, snap.sessions);
 
     const queue = pendingQueue(snap.sessions, focusId);
     const live = new Set(queue.map((q) => q.item.requestId));
@@ -305,13 +308,22 @@ export class Island {
     if (newlyPending) {
       State.isPinned = true;
       this.alert("interaction");
+    } else if (planned && queue.length === 0) {
+      Sound.play("approval");
+      State.focusId = planned;
+      this.showPlan();
     } else if (queue.length === 0 && State.view === "interaction") {
       State.isPinned = false;
       this.fsm.pinned = false;
       this.setKeyboard(false);
       this.rearmCollapse();
-      if (State.mode === "expanded") this.setView(snap.sessions.length ? "session" : "empty");
+      if (State.mode === "expanded") this.setView(this.defaultView());
       else State.view = "session";
+    } else if (State.view === "plan" && !planSession(State.sessions, State.focusId)) {
+      if (State.mode === "expanded") {
+        this.setView(this.defaultView());
+        this.rearmCollapse();
+      } else State.view = "session";
     } else if (State.mode === "expanded" && State.view === "empty" && snap.sessions.length) {
       this.setView("session");
     }
@@ -360,6 +372,15 @@ export class Island {
     this.fsm.pinned = false;
     if (State.mode !== "expanded") this.fsm.forceHome();
     this.expand("finished");
+    this.rearmCollapse();
+  }
+
+  /** The read-only plan card: opens like an alert but never pins, so it closes on its own. */
+  private showPlan() {
+    State.isPinned = false;
+    this.fsm.pinned = false;
+    if (State.mode !== "expanded") this.fsm.forceHome();
+    this.expand("plan");
     this.rearmCollapse();
   }
 

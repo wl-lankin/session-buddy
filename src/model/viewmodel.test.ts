@@ -11,7 +11,7 @@ function mk(p: Partial<Session> = {}): Session {
   return {
     id: `s${n}`, project: "pushdocs", cwd: "C:/Projects/pushdocs", branch: null, termProgram: "WarpTerminal",
     model: null, status: "idle", statusSince: 0, lastPrompt: null, lastMessage: null, steps: [], agents: [],
-    background: [], pending: [], startedAt: n, lastEventAt: n, pid: null, live: true,
+    background: [], pending: [], startedAt: n, lastEventAt: n, pid: null, live: true, plan: null,
     stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: null, contextTokens: null, contextSize: null, costUsd: null },
     ...p,
   };

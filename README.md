@@ -2,13 +2,13 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.1](https://img.shields.io/badge/version-1.0.1-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
 ## Why
 
-When you run several Claude Code sessions in Warp at once, one of them is always waiting for you: a permission prompt, a question, a "shall I go on?". You only notice when you happen to click on that tab. Session Buddy sits at the top edge of your screen, shows what every session is doing, and pops open the moment one needs you. You answer right there, or send it back to the terminal.
+When you run several Claude Code sessions in a terminal at once, one of them is always waiting for you: a permission prompt, a question, a "shall I go on?". You only notice when you happen to click on that tab. Session Buddy sits at the top edge of your screen, shows what every session is doing, and pops open the moment one needs you. You answer right there, or send it back to the terminal.
 
 ## Features
 
@@ -34,19 +34,18 @@ When you run several Claude Code sessions in Warp at once, one of them is always
 | ![Plan](docs/media/plan.png) | **Plan.** The plan from plan mode, to read while you choose in the terminal. |
 | ![Finished](docs/media/finished.png) | **Finished.** A session is done: which one, how long it took, what it said. |
 | ![Several finished](docs/media/finished-merged.png) | **Several finished.** Sessions finishing close together share one card. |
-| ![Settings](docs/media/settings.png) | **Settings.** Install into Claude Code, sounds, timing, hotkey, start-up. |
 
 ## Download
 
 Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/session-buddy/releases/latest)**:
 
-- **Windows**: `Session Buddy_1.0.0_x64-setup.exe`. Installs for the current user, no admin needed.
-- **macOS**: `Session Buddy_1.0.0_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
+- **Windows**: `Session Buddy_1.0.1_x64-setup.exe`. Installs for the current user, no admin needed.
+- **macOS**: `Session Buddy_1.0.1_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
 The builds are not code-signed yet, so the first start needs one extra click:
 
 - **Windows SmartScreen**: "Windows protected your PC" > **More info** > **Run anyway**.
-- **macOS Gatekeeper**: right-click the app > **Open** > **Open** (once). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
+- **macOS Gatekeeper**: open the app once and click **Done**, then System Settings > Privacy & Security > **Open Anyway** (macOS 15 and later no longer offer right-click > Open). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
 
 **Upgrading on Windows from an older "session-buddy" build?** Uninstall the old app first (Settings > Apps), because the install folder name changed. Your hooks and settings stay where they are.
 
@@ -59,10 +58,10 @@ npm install
 npm run pack
 ```
 
-- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.0_x64-setup.exe`.
+- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.1_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
-On macOS the island hangs centred just below the menu bar, so on a MacBook with a notch it sits under the notch, not over it. On Windows it hangs from the top edge of the screen.
+On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
 
 ## Setup
 

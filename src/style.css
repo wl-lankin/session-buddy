@@ -50,8 +50,29 @@ body {
 
 #root {
   position: fixed;
-  inset: 0;
+  inset: var(--notch-top, 0px) 0 0 0;
 }
+
+/* MacBook notch: the cap fills the menu bar strip above the island up to the top of
+   the screen, with small outward shoulders like the notch's own; zero-sized elsewhere. */
+#notch-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--notch-top, 0px);
+  pointer-events: none;
+}
+#notch-cap .cap-body { position: absolute; inset: 0 0 -1px; background: #000; }
+#notch-cap .cap-shoulder {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 8px;
+}
+:root:not(.notched) #notch-cap { display: none; }
+#notch-cap .cap-shoulder.left { right: 100%; background: radial-gradient(circle at 0 100%, transparent 7.5px, #000 8px); }
+#notch-cap .cap-shoulder.right { left: 100%; background: radial-gradient(circle at 100% 100%, transparent 7.5px, #000 8px); }
 
 #island {
   position: absolute;
@@ -322,7 +343,20 @@ body {
   color: var(--dim);
   white-space: nowrap;
 }
+.strip { overflow: hidden; }
 .strip-label { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+.strip-right { display: contents; }
+/* Beside a notch: label left of it, dots and limits right of it, both in the cap. */
+.notched .strip {
+  top: calc(-1 * var(--notch-top));
+  bottom: auto;
+  height: var(--notch-top);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--notch-w) + 16px) minmax(0, 1fr);
+  padding: 0 14px 0 38px;
+}
+.notched .strip-label { grid-column: 1; }
+.notched .strip-right { grid-column: 3; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .strip-dots { display: inline-flex; gap: 4px; }
 .strip-limits { margin-left: auto; font-variant-numeric: tabular-nums; }
 .strip-limits.warn, .c-ctx.warn { color: var(--amber); }

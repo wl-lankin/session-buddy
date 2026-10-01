@@ -2,6 +2,6 @@
   "bundle": {
     "targets": ["app", "dmg"],
     "resources": { "../target/relay/sb-relay": "sb-relay" },
-    "macOS": { "minimumSystemVersion": "13.0" }
+    "macOS": { "minimumSystemVersion": "13.0", "signingIdentity": "-" }
   }
 }

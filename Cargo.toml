@@ -3,7 +3,7 @@ members = ["common", "hook", "core", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 license = "MIT"
 
@@ -13,6 +13,11 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# Proc macros and build scripts are loaded by rustc at build time; a stripped dylib from
+# Xcode 27's strip fails dlopen ("mis-aligned LINKEDIT string pool"), so leave them alone.
+[profile.release.build-override]
+strip = false
 
 # Only the relay aborts on panic (it must never hang Claude Code); the app unwinds,
 # so a panic in one task does not take the island down. Output: target/relay/.

@@ -10,7 +10,8 @@ export function buildStrip(): ViewHost {
   const label = h("span", { class: "strip-label" });
   const dots = h("span", { class: "strip-dots" });
   const limits = h("span", { class: "strip-limits" });
-  const el = h("div", { class: "layer strip" }, label, dots, limits);
+  // The wrapper only matters beside a notch, where dots and limits share the right wing.
+  const el = h("div", { class: "layer strip" }, label, h("span", { class: "strip-right" }, dots, limits));
   let dotsKey = "";
   return {
     el,
@@ -19,6 +20,13 @@ export function buildStrip(): ViewHost {
       const cs = getComputedStyle(el);
       const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
       const gap = parseFloat(cs.columnGap) || 0;
+      if (document.documentElement.classList.contains("notched")) {
+        // Two equal wings around the notch, so the notch stays centred: the wider one decides.
+        const notch = parseFloat(cs.getPropertyValue("--notch-w")) || 0;
+        const left = parseFloat(cs.paddingLeft) + label.scrollWidth;
+        const right = dots.scrollWidth + gap + limits.scrollWidth + parseFloat(cs.paddingRight);
+        return 2 * Math.max(left, right) + notch + 16 + 1;
+      }
       return pad + label.scrollWidth + dots.scrollWidth + limits.scrollWidth + 2 * gap + 1;
     },
     sync() {

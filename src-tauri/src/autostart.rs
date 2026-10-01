@@ -27,7 +27,11 @@ pub fn refresh(app: &AppHandle, autostart: bool) {
     let mut enabled_ok = false;
     if autostart {
         match app.autolaunch().enable() {
-            Ok(()) => enabled_ok = true,
+            Ok(()) => {
+                enabled_ok = true;
+                #[cfg(target_os = "macos")]
+                associate_bundle(app);
+            }
             Err(err) => crate::log::line(format!("autostart: {err}")),
         }
     }
@@ -71,6 +75,34 @@ fn remove_legacy() -> Result<bool, String> {
     Ok(true)
 }
 
+/// The plugin leaves the LaunchAgent's AssociatedBundleIdentifiers empty, so Login Items in
+/// System Settings shows the bare binary ("session-buddy", exec icon) instead of the app.
+/// `None` when the plist already names a bundle or has no empty list to fill.
+pub fn with_bundle_id(plist: &str, identifier: &str) -> Option<String> {
+    const KEY: &str = "<key>AssociatedBundleIdentifiers</key>";
+    const EMPTY: &str = "<array></array>";
+    let after_key = plist.find(KEY)? + KEY.len();
+    let rest = &plist[after_key..];
+    let start = after_key + (rest.len() - rest.trim_start().len());
+    if !plist[start..].starts_with(EMPTY) {
+        return None;
+    }
+    Some(format!("{}<array><string>{identifier}</string></array>{}", &plist[..start], &plist[start + EMPTY.len()..]))
+}
+
+#[cfg(target_os = "macos")]
+fn associate_bundle(app: &AppHandle) {
+    let Some(home) = std::env::var_os("HOME") else { return };
+    let name = &app.package_info().name;
+    let plist = std::path::PathBuf::from(home).join("Library").join("LaunchAgents").join(format!("{name}.plist"));
+    let Ok(text) = std::fs::read_to_string(&plist) else { return };
+    if let Some(fixed) = with_bundle_id(&text, &app.config().identifier) {
+        if let Err(err) = std::fs::write(&plist, fixed) {
+            crate::log::line(format!("autostart: could not name the app in the LaunchAgent: {err}"));
+        }
+    }
+}
+
 #[cfg(not(any(windows, target_os = "macos")))]
 fn remove_legacy() -> Result<bool, String> {
     Ok(false)
@@ -86,6 +118,15 @@ mod tests {
         assert!(launches_us(r#""C:\Program Files\Session Buddy\Session Buddy.exe""#));
         assert!(launches_us("<string>/Applications/Session Buddy.app/Contents/MacOS/session-buddy</string>"));
         assert!(!launches_us(r"C:\Program Files\Other\other.exe --minimized"));
+    }
+
+    #[test]
+    fn names_the_bundle_in_an_empty_identifier_list_only() {
+        let plist = "<dict>\n  <key>Label</key>\n  <string>Session Buddy</string>\n  <key>AssociatedBundleIdentifiers</key>\n  <array></array>\n  <key>RunAtLoad</key>\n  <true/>\n</dict>";
+        let fixed = with_bundle_id(plist, "de.wlankin.sessionbuddy").unwrap();
+        assert!(fixed.contains("<key>AssociatedBundleIdentifiers</key>\n  <array><string>de.wlankin.sessionbuddy</string></array>\n  <key>RunAtLoad</key>"));
+        assert!(with_bundle_id(&fixed, "de.wlankin.sessionbuddy").is_none(), "already named: left alone");
+        assert!(with_bundle_id("<dict></dict>", "x").is_none());
     }
 
     #[test]

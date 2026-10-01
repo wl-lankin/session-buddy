@@ -85,8 +85,8 @@ export function botPosition(mode: IslandMode, view: IslandViewName): BotPlacemen
       return { cx: 34, cy: 32, diameter: 38, opacity: 1 };
     case "expanded":
       if (view === "greeting") return { cx: 320, cy: 90, diameter: 0, opacity: 0 };
-      // The session view's tab row spans the whole island: Buddy sits below it, level with the project-name line.
-      if (view === "session") return { cx: 56, cy: 71, diameter: 58, opacity: 1 };
+      // The session view's tab row spans the whole island: Buddy sits below it.
+      if (view === "session") return { cx: 56, cy: 112, diameter: 58, opacity: 1 };
       return { cx: 56, cy: 96, diameter: 58, opacity: 1 };
   }
 }

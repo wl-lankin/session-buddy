@@ -11,8 +11,8 @@ import {
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Cue, CueKind, Snapshot } from "../core/types";
-import { BotEngine, hexToRGB } from "../mochi/engine";
-import { Greeting } from "../mochi/greeting";
+import { BotEngine, hexToRGB } from "../buddy/engine";
+import { Greeting } from "../buddy/greeting";
 import { FINISH_CARD_S, mergeFinish, planFinish, playsSound, type FinishItem } from "../model/finish";
 import { newPlan, planSession } from "../model/plan";
 import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";

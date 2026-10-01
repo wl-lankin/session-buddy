@@ -17,7 +17,7 @@ export const PANEL_H = 440;
 /** Measured cards (interaction, finished) grow up to this height on their own. */
 const CARD_MAX_H = 400;
 
-// The launch greeting animates out of a notch-sized shape (src/mochi/greeting.ts).
+// The launch greeting animates out of a notch-sized shape (src/buddy/greeting.ts).
 export const NOTCH_W = 184;
 export const NOTCH_H = 32;
 export const COMPACT_W = 288;

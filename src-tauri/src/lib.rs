@@ -247,8 +247,18 @@ fn spawn_loops(app: AppHandle) {
                 if st.tick(now) || removed {
                     mark_dirty();
                 }
-                st.sessions_needing_branch(now, 30_000)
+                (st.sessions_needing_branch(now, 30_000), st.sessions_needing_toplevel())
             };
+            let (todo, roots) = todo;
+            for (id, cwd) in roots {
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let found = branch::toplevel(&cwd);
+                    if app.state::<Shared>().hub.store.lock().unwrap().set_toplevel(&id, found) {
+                        mark_dirty();
+                    }
+                });
+            }
             for (id, cwd) in todo {
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {

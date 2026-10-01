@@ -118,6 +118,14 @@ pub struct Session {
     pub agent_descriptions: Vec<(String, String)>,
     #[serde(skip)]
     pub branch_checked_at: i64,
+    /// The first cwd seen: the project name comes from its git top level and never follows later cds.
+    #[serde(skip)]
+    pub first_cwd: Option<String>,
+    #[serde(skip)]
+    pub toplevel_checked: bool,
+    /// When the current turn started (prompt, or the first work event when the prompt was not seen).
+    #[serde(skip)]
+    pub turn_started_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -136,6 +144,15 @@ pub enum CueKind {
 pub struct Cue {
     pub session_id: String,
     pub kind: CueKind,
+    /// Finish cues: how long the turn took.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_ms: Option<i64>,
+}
+
+impl Cue {
+    pub fn new(session_id: String, kind: CueKind) -> Self {
+        Self { session_id, kind, turn_ms: None }
+    }
 }
 
 pub struct Store {
@@ -185,6 +202,9 @@ impl Session {
             live: false,
             agent_descriptions: Vec::new(),
             branch_checked_at: i64::MIN / 2,
+            first_cwd: None,
+            toplevel_checked: false,
+            turn_started_at: None,
         }
     }
 
@@ -194,6 +214,13 @@ impl Session {
         if next != self.status {
             self.status = next;
             self.status_since = now;
+        }
+        match next {
+            Status::Thinking | Status::Working => {
+                self.turn_started_at.get_or_insert(now);
+            }
+            Status::NeedsYou => {}
+            _ => self.turn_started_at = None,
         }
     }
 
@@ -273,7 +300,8 @@ impl Store {
         list
     }
 
-    /// Finds or creates the session, marks it live, records the relay's pid and refreshes cwd / project / terminal.
+    /// Finds or creates the session, marks it live, records the relay's pid and refreshes cwd / terminal.
+    /// The project is set from the first cwd only.
     fn touch(&mut self, p: &Value, now: i64) -> Option<&mut Session> {
         let id = s(p, "session_id")?;
         let sess = self.sessions.entry(id.to_string()).or_insert_with(|| Session::new(id, now));
@@ -284,8 +312,11 @@ impl Store {
         if let Some(cwd) = s(p, "cwd") {
             if sess.cwd != cwd {
                 sess.cwd = cwd.to_string();
-                sess.project = project_name(cwd);
                 sess.branch_checked_at = i64::MIN / 2;
+                if sess.first_cwd.is_none() {
+                    sess.first_cwd = Some(cwd.to_string());
+                    sess.project = project_name(cwd);
+                }
             }
         }
         if let Some(t) = s(p, "term_program") {
@@ -324,14 +355,17 @@ impl Store {
         let is_agent_tool = tool == "Agent" || tool == "Task";
 
         let mut cues = Vec::new();
-        let mut cue = |kind| cues.push(Cue { session_id: id.clone(), kind });
+        let mut finished_turn = None;
+        let mut cue = |kind| cues.push(Cue::new(id.clone(), kind));
 
         match event {
             "SessionStart" => cue(CueKind::Work),
             "UserPromptSubmit" => {
-                if let Some(t) = s(p, "prompt") {
+                // Wrappers such as <agent-message>, <command-name> or <system-reminder> are not typed prompts.
+                if let Some(t) = s(p, "prompt").map(str::trim).filter(|t| !t.is_empty() && !t.starts_with('<')) {
                     sess.last_prompt = Some(clip(t, 300));
                 }
+                sess.turn_started_at = Some(now);
                 sess.set_status(Status::Thinking, now);
             }
             "PreToolUse" if tool == "AskUserQuestion" => {
@@ -411,6 +445,7 @@ impl Store {
                         cue(CueKind::Approval);
                     }
                     None => {
+                        finished_turn = sess.turn_started_at.map(|t| now - t);
                         sess.set_status(Status::Finished, now);
                         if sess.status == Status::Finished {
                             cue(CueKind::Finish);
@@ -445,6 +480,9 @@ impl Store {
             }
             _ => {}
         }
+        for c in cues.iter_mut().filter(|c| c.kind == CueKind::Finish) {
+            c.turn_ms = finished_turn;
+        }
         cues
     }
 
@@ -474,7 +512,7 @@ impl Store {
             };
             if let Some(pc) = pct {
                 if before < 90.0 && pc >= 90.0 {
-                    cues.push(Cue { session_id: sess.id.clone(), kind: CueKind::Context });
+                    cues.push(Cue::new(sess.id.clone(), CueKind::Context));
                 }
             }
         }
@@ -493,6 +531,9 @@ impl Store {
                 _ => Status::Working,
             };
             sess.status = Status::Idle; // force set_status to stamp status_since
+            if next == Status::Thinking {
+                sess.turn_started_at = Some(now); // a reply starts a new turn
+            }
             sess.set_status(next, now);
             return Some(sess.id.clone());
         }
@@ -556,6 +597,33 @@ impl Store {
         out
     }
 
+    /// Sessions whose first cwd still needs a `git rev-parse --show-toplevel`; each is handed out once.
+    pub fn sessions_needing_toplevel(&mut self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for s in self.sessions.values_mut() {
+            if s.toplevel_checked {
+                continue;
+            }
+            if let Some(cwd) = &s.first_cwd {
+                s.toplevel_checked = true;
+                out.push((s.id.clone(), cwd.clone()));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Names the project after the repository's top-level directory. `None` keeps the fallback.
+    pub fn set_toplevel(&mut self, id: &str, toplevel: Option<String>) -> bool {
+        let (Some(s), Some(top)) = (self.sessions.get_mut(id), toplevel) else { return false };
+        let name = project_name(&top);
+        if s.project == name {
+            return false;
+        }
+        s.project = name;
+        true
+    }
+
     pub fn set_branch(&mut self, id: &str, branch: Option<String>) -> bool {
         match self.sessions.get_mut(id) {
             Some(s) if s.branch != branch => {
@@ -590,7 +658,7 @@ mod tests {
     fn session_created_with_project_and_terminal() {
         let mut st = Store::default();
         let cues = st.apply_hook(&ev("SessionStart", json!({"term_program": "WarpTerminal"})), T0);
-        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Work }]);
+        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Work, turn_ms: None }]);
         let s = sess(&st);
         assert_eq!(s.project, "pushdocs");
         assert_eq!(s.term_program.as_deref(), Some("WarpTerminal"));
@@ -900,6 +968,91 @@ mod tests {
         assert!(!st.set_branch("s1", Some("PDD-1981".into())));
         assert_eq!(sess(&st).branch.as_deref(), Some("PDD-1981"));
         assert_eq!(st.sessions_needing_branch(T0 + 30_000, 30_000).len(), 1);
+    }
+
+    #[test]
+    fn project_comes_from_the_first_cwd_and_never_follows_cd() {
+        let mut st = Store::default();
+        let at = |cwd: &str| json!({"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": cwd, "tool_name": "Read"});
+        st.apply_hook(&at(r"C:\Projects\session-buddy\core"), T0);
+        assert_eq!(sess(&st).project, "core", "fallback: last component of the first cwd");
+        assert_eq!(st.sessions_needing_toplevel(), vec![("s1".to_string(), r"C:\Projects\session-buddy\core".to_string())]);
+        assert!(st.sessions_needing_toplevel().is_empty(), "looked up once");
+        assert!(st.set_toplevel("s1", Some("C:/Projects/session-buddy".into())));
+        assert_eq!(sess(&st).project, "session-buddy");
+        st.apply_hook(&at(r"C:\Projects\pushdocs\api"), T0 + 1);
+        assert_eq!(sess(&st).cwd, r"C:\Projects\pushdocs\api", "cwd follows the session");
+        assert_eq!(sess(&st).project, "session-buddy", "project never does");
+        assert!(st.sessions_needing_toplevel().is_empty(), "a later cwd is not looked up");
+    }
+
+    #[test]
+    fn project_falls_back_when_not_a_repo() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("SessionStart", json!({})), T0);
+        assert_eq!(st.sessions_needing_toplevel().len(), 1);
+        assert!(!st.set_toplevel("s1", None));
+        assert_eq!(sess(&st).project, "pushdocs");
+        assert!(!st.set_toplevel("nope", Some("/x/y".into())));
+    }
+
+    #[test]
+    fn seeded_session_keeps_its_project_when_cwd_changes() {
+        let mut st = Store::default();
+        let mut seeded = Session::new("s1", T0);
+        seeded.cwd = r"C:\Projects\pushdocs".into();
+        seeded.first_cwd = Some(seeded.cwd.clone());
+        seeded.project = "pushdocs".into();
+        st.seed(seeded);
+        st.apply_hook(&json!({"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": "/tmp/other", "tool_name": "Read"}), T0 + 1);
+        assert_eq!(sess(&st).project, "pushdocs");
+        assert_eq!(sess(&st).cwd, "/tmp/other");
+    }
+
+    #[test]
+    fn wrapped_prompts_do_not_replace_the_last_prompt() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "fix the island layout"})), T0);
+        for wrapped in ["<agent-message from=\"x\">hi</agent-message>", "  <command-name>/clear</command-name>", "<system-reminder>x</system-reminder>"] {
+            st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": wrapped})), T0 + 1);
+            assert_eq!(sess(&st).last_prompt.as_deref(), Some("fix the island layout"), "{wrapped}");
+        }
+        assert_eq!(sess(&st).status, Status::Thinking, "the turn still starts");
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "  next < step  "})), T0 + 2);
+        assert_eq!(sess(&st).last_prompt.as_deref(), Some("next < step"));
+    }
+
+    #[test]
+    fn finish_cue_carries_the_turn_duration() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0);
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Read"})), T0 + 1_000);
+        st.apply_hook(&ev("PostToolUse", json!({"tool_name": "Read"})), T0 + 2_000);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 65_000);
+        assert_eq!(cues, vec![Cue { session_id: "s1".into(), kind: CueKind::Finish, turn_ms: Some(65_000) }]);
+        let v = serde_json::to_value(&cues[0]).unwrap();
+        assert_eq!(v["turnMs"], 65_000);
+        // A turn whose start was never seen (app started mid-turn) starts at its first work event.
+        let mut st = Store::default();
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Read"})), T0);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 5_000);
+        assert_eq!(cues[0].turn_ms, Some(5_000));
+        // A Stop without any turn has no duration and the field is left out.
+        let mut st = Store::default();
+        st.apply_hook(&ev("SessionStart", json!({})), T0);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 1);
+        assert_eq!(cues[0].turn_ms, None);
+        assert!(serde_json::to_value(&cues[0]).unwrap().get("turnMs").is_none());
+    }
+
+    #[test]
+    fn the_next_turn_measures_from_its_own_prompt() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "one"})), T0);
+        st.apply_hook(&ev("Stop", json!({})), T0 + 10_000);
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "two"})), T0 + 50_000);
+        let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 53_000);
+        assert_eq!(cues[0].turn_ms, Some(3_000));
     }
 
     #[test]

@@ -135,6 +135,7 @@ pub fn session_from_seed(seed: &Seed, now: i64, stale_after_ms: i64) -> Session 
     let mut s = Session::new(&seed.session_id, seed.modified_ms);
     s.cwd = seed.cwd.clone();
     s.project = project_name(&seed.cwd);
+    s.first_cwd = (!seed.cwd.is_empty()).then(|| seed.cwd.clone());
     s.last_prompt = seed.last_prompt.clone();
     s.last_message = seed.last_message.clone();
     s.model = seed.model.clone();
@@ -161,6 +162,8 @@ mod tests {
             json!({"type":"user","sessionId":"s1","message":{"content":[{"type":"tool_result","content":"..."}]}}),
             json!({"type":"user","sessionId":"s1","isMeta":true,"message":{"content":"meta noise"}}),
             json!({"type":"assistant","sessionId":"s1","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"Fixed. "},{"type":"text","text":"Tests pass."}]}}),
+            json!({"type":"user","sessionId":"s1","message":{"role":"user","content":"  <agent-message from=\"general\">done</agent-message>"}}),
+            json!({"type":"user","sessionId":"s1","message":{"role":"user","content":"<system-reminder>x</system-reminder>"}}),
         ])
     }
 
@@ -207,6 +210,7 @@ mod tests {
         let fresh = session_from_seed(&seed, 1_000 + 60_000, 10 * 60_000);
         assert_eq!(fresh.status, Status::Idle);
         assert_eq!(fresh.project, "bankconnect");
+        assert_eq!(fresh.first_cwd.as_deref(), Some("/p/bankconnect"), "the seed's cwd names the project for good");
         assert_eq!(fresh.model.as_deref(), Some("claude-opus-5-5"));
         assert_eq!(fresh.last_event_at, 1_000);
         assert!(!fresh.live, "seeded sessions stay recent until their first event");

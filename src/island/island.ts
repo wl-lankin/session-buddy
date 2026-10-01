@@ -28,6 +28,10 @@ const BOT_OVERHANG = 40;
 const HIT_MARGIN = 14;
 const FLASH_MS = 6000;
 const WHEEL_GAP_MS = 180;
+/** The grip resizes once the pointer moved this far. */
+const DRAG_START_PX = 4;
+/** Step rows are 20 px: the views re-sync when the height crosses one. */
+const ROW_STEP_PX = 20;
 
 const CUE_SOUNDS: Record<CueKind, string> = {
   work: "work", finish: "finish", error: "error", approval: "approval", rate: "rate", context: "question",
@@ -104,7 +108,9 @@ export class Island {
   private sizeAnchor: SizeAnchor & { view: IslandViewName } = { focusId: null, requestId: null, view: "session" };
   private lastPointerAt = performance.now();
   /** A grip drag in progress. */
-  private drag: { pointerId: number; startY: number; startH: number } | null = null;
+  private heightBucket = 0;
+  private wasResizing = false;
+  private drag: { pointerId: number; startY: number; startH: number; active: boolean } | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -498,7 +504,7 @@ export class Island {
 
   /** Automatic reset: the card was answered, the focus moved, the island closed, or two idle minutes. */
   private checkSizeReset(nowMs: number) {
-    if (State.manualH == null || this.drag) return;
+    if (State.manualH == null || this.dragging) return;
     const now = this.currentAnchor();
     const reset = shouldResetSize({
       anchor: this.sizeAnchor,
@@ -520,25 +526,31 @@ export class Island {
       } catch {
         // Not an active pointer (synthetic event): the drag still works while the pointer stays on the grip.
       }
-      this.drag = { pointerId: e.pointerId, startY: e.clientY, startH: this.height.value };
-      this.setManualHeight(Math.round(this.height.value));
-      this.islandEl.classList.add("resizing");
-      // The whole (now tall) window takes the pointer while dragging, so it can move past the island's edge.
-      this.syncPanel();
-      this.ensureRunning();
+      // Nothing changes yet: a plain click or double-click must not resize anything.
+      this.drag = { pointerId: e.pointerId, startY: e.clientY, startH: this.height.value, active: false };
     });
     this.grip.addEventListener("pointermove", (e) => {
-      if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+      const d = this.drag;
+      if (!d || e.pointerId !== d.pointerId) return;
       this.lastPointerAt = performance.now();
-      const h = clampHeight(this.drag.startH + e.clientY - this.drag.startY, this.naturalSize().h, screenSize());
+      if (!d.active) {
+        if (Math.abs(e.clientY - d.startY) < DRAG_START_PX) return;
+        d.active = true;
+        this.setManualHeight(Math.round(d.startH));
+        this.islandEl.classList.add("resizing");
+        // The whole (now tall) window takes the pointer while dragging, so it can move past the island's edge.
+        this.syncPanel();
+      }
+      const h = clampHeight(d.startH + e.clientY - d.startY, this.naturalSize().h, screenSize());
       State.manualH = h;
       this.height.jump(h);
-      this.dirty = true;
       this.ensureRunning();
     });
     const end = (e: PointerEvent) => {
-      if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+      const d = this.drag;
+      if (!d || e.pointerId !== d.pointerId) return;
       this.endDrag();
+      if (!d.active) return;
       // Dragged back to (or above) the natural height: that is the natural size again.
       if (State.manualH != null && State.manualH <= this.naturalSize().h) State.manualH = null;
       this.animateGeometry(false);
@@ -546,26 +558,46 @@ export class Island {
     };
     this.grip.addEventListener("pointerup", end);
     this.grip.addEventListener("pointercancel", end);
+    this.grip.addEventListener("lostpointercapture", end);
     this.grip.addEventListener("dblclick", (e) => {
       e.stopPropagation();
       this.resetSize();
     });
   }
 
+  /** A grip drag that has moved far enough to resize. */
+  private get dragging(): boolean {
+    return this.drag?.active === true;
+  }
+
   private endDrag() {
-    if (!this.drag) return;
-    if (this.grip.hasPointerCapture(this.drag.pointerId)) this.grip.releasePointerCapture(this.drag.pointerId);
+    const d = this.drag;
+    if (!d) return;
     this.drag = null;
+    if (this.grip.hasPointerCapture(d.pointerId)) this.grip.releasePointerCapture(d.pointerId);
     this.islandEl.classList.remove("resizing");
     this.pushedRect = { x: -1, y: -1, w: -1, h: -1 };
   }
 
   /** The OS window follows the island: larger while it is wide or tall, the default panel otherwise. */
   private syncPanel() {
-    const w = Math.max(this.width.value, this.target.w);
-    const h = this.drag ? maxHeight(this.naturalSize().h, screenSize()) : Math.max(this.height.value, this.target.h);
-    const want = panelFor(w, h);
+    const h = this.dragging ? maxHeight(this.naturalSize().h, screenSize()) : this.target.h;
+    const want = panelFor(this.target.w, h);
     if (want.w === this.panel.w && want.h === this.panel.h) return;
+    // Grow at once, so the island never draws past the window; shrink once the island has arrived (one call, no burst).
+    const shrinking = want.w < this.panel.w || want.h < this.panel.h;
+    const grows = want.w > this.panel.w || want.h > this.panel.h;
+    if (shrinking && !grows && (this.width.animating || this.height.animating || this.dragging)) return;
+    if (shrinking && grows) {
+      // One dimension grows while the other shrinks: grow now, keep the larger side until the island settles.
+      if (this.width.animating || this.height.animating) {
+        const keep = { w: Math.max(want.w, this.panel.w), h: Math.max(want.h, this.panel.h) };
+        if (keep.w === this.panel.w && keep.h === this.panel.h) return;
+        this.panel = keep;
+        void Bridge.setPanelSize(keep.w, keep.h);
+        return;
+      }
+    }
     this.panel = want;
     if (want.w === PANEL_W && want.h === PANEL_H) void Bridge.resetPanelSize();
     else void Bridge.setPanelSize(want.w, want.h);
@@ -594,7 +626,7 @@ export class Island {
     };
     move(this.width, this.target.w, next.w);
     // While the grip is dragged the height follows the pointer, not a spring.
-    if (!this.drag) move(this.height, this.target.h, next.h);
+    if (!this.dragging) move(this.height, this.target.h, next.h);
     move(this.radius, this.target.r, next.r);
     this.target = next;
     this.ensureRunning();
@@ -615,7 +647,7 @@ export class Island {
     this.islandEl.style.transform = "translateX(-50%)";
     this.greetingCanvas.style.left = `${(w - GREETING_W) / 2}px`;
     // While the grip is dragged the whole window takes the pointer (see wireGrip).
-    const rect = this.drag
+    const rect = this.dragging
       ? { x: 0, y: 0, w: this.viewportW(), h: window.innerHeight > 0 ? window.innerHeight : this.panel.h }
       : { x: (this.viewportW() - w) / 2, y: 0, w, h: hh };
     const p = this.pushedRect;
@@ -803,8 +835,13 @@ export class Island {
     this.radius.step(dt, nowMs);
     this.applyGeometry();
     this.syncPanel();
-    // A changing height changes how many step rows fit.
-    if (State.mode === "expanded" && this.height.animating) this.dirty = true;
+    // A changing size changes how many step rows fit and what the rows need: re-sync when the
+    // height crosses a 20 px row boundary and once when the island has settled, not every frame.
+    const resizing = this.width.animating || this.height.animating || this.dragging;
+    const bucket = Math.floor(this.height.value / ROW_STEP_PX);
+    if (State.mode === "expanded" && (bucket !== this.heightBucket || (this.wasResizing && !resizing))) this.dirty = true;
+    this.heightBucket = bucket;
+    this.wasResizing = resizing;
 
     if (State.flash && nowMs > State.flash.until) {
       State.flash = null;
@@ -818,8 +855,6 @@ export class Island {
       this.dirty = false;
       this.syncDom();
     }
-    // Invariant under the island's own width, so measuring while it springs is fine.
-    if (State.mode === "expanded" && (this.width.animating || this.height.animating)) this.refreshAutoWidth();
 
     this.updateBotTargets();
     this.botCx.step(dt);
@@ -842,7 +877,7 @@ export class Island {
     if (State.mode === "expanded") this.views.get(State.view)?.tick?.(nowMs);
     this.updateCountdown(nowMs);
 
-    const settling = this.width.animating || this.height.animating || this.radius.animating || this.drag != null;
+    const settling = this.width.animating || this.height.animating || this.radius.animating || this.dragging;
     const animating =
       settling || !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
       greetingActive || this.engine.busy || State.flash != null || State.notice != null;

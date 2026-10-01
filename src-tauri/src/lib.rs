@@ -135,7 +135,7 @@ fn set_panel_size(app: AppHandle, shared: State<Shared>, width: f64, height: f64
     island::apply_geometry(&app, &pref);
 }
 
-/// Back to the default 960x400 panel.
+/// Back to the default 960x440 panel.
 #[tauri::command]
 fn reset_panel_size(app: AppHandle, shared: State<Shared>) {
     island::set_panel(island::PANEL_W, island::PANEL_H);

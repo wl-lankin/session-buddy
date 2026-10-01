@@ -1,5 +1,5 @@
 // Island geometry. All values are logical pixels. The window is a transparent
-// panel, 960x400 unless the island needs more (src/model/size.ts panelFor); the
+// panel, 960x440 unless the island needs more (src/model/size.ts panelFor); the
 // island is drawn inside it, glued to the top edge and horizontally centred.
 
 export type IslandMode = "strip" | "compact" | "expanded";
@@ -13,7 +13,9 @@ export type BotEmoteName = "love" | "surprised" | "proud" | "wink" | "yawn" | "h
 
 /** The default panel. Keep in sync with src-tauri/src/island.rs and tauri.conf.json. */
 export const PANEL_W = 960;
-export const PANEL_H = 400;
+export const PANEL_H = 440;
+/** Measured cards (interaction, finished) grow up to this height on their own. */
+const CARD_MAX_H = 400;
 
 // The launch greeting animates out of a notch-sized shape (src/mochi/greeting.ts).
 export const NOTCH_W = 184;
@@ -48,8 +50,8 @@ export const VIEW_HEIGHT_SESSION = VIEW_HEIGHTS.session;
 /** Views whose height follows their content (ViewHost.measure), within [min, max]. */
 const MEASURED: Partial<Record<IslandViewName, [number, number]>> = {
   session: [VIEW_HEIGHTS.session, 600],
-  interaction: [200, PANEL_H],
-  finished: [VIEW_HEIGHTS.finished, PANEL_H],
+  interaction: [200, CARD_MAX_H],
+  finished: [VIEW_HEIGHTS.finished, CARD_MAX_H],
 };
 
 /** Natural island size. `measured` is the view's content height, `expandedWidth` the auto width (src/model/size.ts). */

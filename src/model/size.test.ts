@@ -54,8 +54,9 @@ describe("accountWidth", () => {
 
 describe("panelFor", () => {
   it("keeps the default panel for the normal island", () => {
-    expect(panelFor(920, 360)).toEqual({ w: 960, h: 400 });
-    expect(panelFor(340, 28)).toEqual({ w: 960, h: 400 });
+    expect(panelFor(920, 380)).toEqual({ w: 960, h: 440 });
+    expect(panelFor(920, 400)).toEqual({ w: 960, h: 440 });
+    expect(panelFor(340, 28)).toEqual({ w: 960, h: 440 });
   });
 
   it("grows in 40 px steps with room around the island", () => {

@@ -1,5 +1,5 @@
 //! The island window: a transparent panel at the top centre of the screen,
-//! 960x400 by default and larger while the island is enlarged or wide. Outside
+//! 960x440 by default and larger while the island is enlarged or wide. Outside
 //! the island shape it lets clicks through; a 30 Hz cursor feed drives Mochi's
 //! eyes and the hover logic.
 
@@ -12,10 +12,13 @@ use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize
 
 /// The default panel. Keep in sync with src/core/layout.ts and tauri.conf.json.
 pub const PANEL_W: f64 = 960.0;
-pub const PANEL_H: f64 = 400.0;
+pub const PANEL_H: f64 = 440.0;
 
 /// The panel size the front end asked for, logical pixels (see `set_panel_size`).
 static PANEL: Mutex<(f64, f64)> = Mutex::new((PANEL_W, PANEL_H));
+
+/// The monitor (position and scale) the window was last placed on.
+static LAST_MONITOR: Mutex<Option<(i32, i32, u64)>> = Mutex::new(None);
 
 /// Never smaller than the default panel; non-finite input keeps the default.
 pub fn panel_request(width: f64, height: f64) -> (f64, f64) {
@@ -104,10 +107,25 @@ pub fn apply_geometry(app: &AppHandle, pref: &str) {
     let pw = ((lw * scale).round() as u32).min(width);
     let ph = ((lh * scale).round() as u32).min(height);
     let x = x0 + (width as i32 - pw as i32) / 2;
-    let _ = win.set_size(PhysicalSize::new(pw, ph));
-    let _ = win.set_position(PhysicalPosition::new(x, y0));
-    // Moving across displays can rescale the window: re-assert the size.
-    let _ = win.set_size(PhysicalSize::new(pw, ph));
+    let key = (m.position().x, m.position().y, scale.to_bits());
+    let moved_monitor = LAST_MONITOR.lock().unwrap().replace(key) != Some(key);
+    // One move+resize, so a growing or shrinking panel stays centred instead of jumping sideways.
+    #[cfg(windows)]
+    {
+        if !win32::move_resize(&win, x, y0, pw, ph) {
+            let _ = win.set_position(PhysicalPosition::new(x, y0));
+            let _ = win.set_size(PhysicalSize::new(pw, ph));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = win.set_position(PhysicalPosition::new(x, y0));
+        let _ = win.set_size(PhysicalSize::new(pw, ph));
+    }
+    // Moving across displays can rescale the window: re-assert the size then only.
+    if moved_monitor {
+        let _ = win.set_size(PhysicalSize::new(pw, ph));
+    }
     let _ = win.set_always_on_top(true);
 }
 
@@ -202,7 +220,8 @@ mod win32 {
     use tauri::WebviewWindow;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_NOACTIVATE, SWP_NOZORDER, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW,
     };
 
     fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
@@ -220,6 +239,14 @@ mod win32 {
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE.0 as isize | WS_EX_TOOLWINDOW.0 as isize);
         }
+    }
+
+    /// Position and size in one SetWindowPos (physical pixels). False when it could not be applied.
+    pub fn move_resize(win: &WebviewWindow, x: i32, y: i32, w: u32, h: u32) -> bool {
+        let Some(hwnd) = hwnd_of(win) else { return false };
+        let (Ok(w), Ok(h)) = (i32::try_from(w), i32::try_from(h)) else { return false };
+        // SAFETY: plain window call on our own window handle.
+        unsafe { SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) }.is_ok()
     }
 
     pub fn set_activating(win: &WebviewWindow, activating: bool) {

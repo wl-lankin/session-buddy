@@ -22,7 +22,7 @@
         "title": "Session Buddy",
         "url": "index.html",
         "width": 960,
-        "height": 400,
+        "height": 440,
         "resizable": false,
         "decorations": false,
         "transparent": true,

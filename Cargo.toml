@@ -1,5 +1,5 @@
 [workspace]
-members = ["common", "hook", "core"]
+members = ["common", "hook", "core", "src-tauri"]
 resolver = "2"
 
 [workspace.package]

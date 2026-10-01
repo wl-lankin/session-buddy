@@ -1,0 +1,29 @@
+[package]
+name = "session-buddy"
+description = "See and answer all your Claude Code sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "session_buddy_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.5", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sb-common = { path = "../common" }
+sb-core = { path = "../core" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": { "../target/release/sb-relay": "sb-relay" },
+    "macOS": { "minimumSystemVersion": "13.0" }
+  }
+}

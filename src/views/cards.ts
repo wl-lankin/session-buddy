@@ -1,6 +1,7 @@
 // The card for whatever is waiting for the user: a permission request, an
 // AskUserQuestion prompt, or a plain-text question at the end of a turn.
-// One card at a time, oldest first; the rest are counted, never replaced.
+// One card at a time: the card on screen stays until it resolves, then the focused
+// session's items, then the other sessions in list order. The rest are counted, never replaced.
 
 import { h } from "./dom";
 import { State } from "../core/state";
@@ -17,6 +18,9 @@ const KIND_LABEL: Record<Interaction["kind"], string> = {
   reply: "Claude asks",
 };
 
+/** Clicks this soon after the card changed were aimed at the previous card. */
+const CHANGE_GRACE_MS = 500;
+
 const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
 
 export function buildInteraction(actions: ViewActions): ViewHost {
@@ -28,6 +32,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   const el = h("div", { class: "view interaction-view" }, head, body, notice, foot);
 
   let shownId = "";
+  let shownAt = 0;
   let current: { session: Session; item: Interaction } | null = null;
   let picks: Record<string, string[]> = {};
   let other: Record<string, string> = {};
@@ -38,8 +43,10 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     if (!locked) refreshSubmit();
   });
 
+  const settled = () => performance.now() - shownAt >= CHANGE_GRACE_MS;
+
   const answer = (requestId: string, payload: unknown) => {
-    if (guard.lock(State.notice)) actions.answer(requestId, payload);
+    if (settled() && guard.lock(State.notice)) actions.answer(requestId, payload);
   };
 
   const focusField = (field: HTMLInputElement | HTMLTextAreaElement) => {
@@ -47,7 +54,9 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     window.setTimeout(() => field.focus(), 120);
   };
 
-  const terminalBtn = (requestId: string) => btn("Answer in terminal", "secondary", () => actions.release(requestId));
+  const terminalBtn = (requestId: string) => btn("Answer in terminal", "secondary", () => {
+      if (settled()) actions.release(requestId);
+    });
 
   function refreshSubmit() {
     if (!submit || current?.item.kind !== "question") return;
@@ -154,7 +163,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   return {
     el,
     sync() {
-      const queue = pendingQueue(State.sessions, State.focusId);
+      const queue = pendingQueue(State.sessions, State.focusId, shownId || null);
       current = queue[0] ?? null;
       guard.observe(State.notice);
       notice.textContent = State.notice?.text ?? "";
@@ -179,6 +188,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       );
       if (item.requestId === shownId) return;
       shownId = item.requestId;
+      shownAt = performance.now();
       guard.reset();
       picks = {};
       other = {};
@@ -199,6 +209,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     key(e) {
       if (!current || current.item.kind !== "question") return false;
       if (e.key === "Enter" && !(e.target as Element | null)?.closest("textarea")) {
+        e.preventDefault();
         submit?.click();
         return true;
       }

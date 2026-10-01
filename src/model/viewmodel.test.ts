@@ -71,6 +71,25 @@ describe("viewmodel", () => {
     expect(pendingQueue([a, b], null).map((x) => x.item.requestId)).toEqual(["a1", "a2", "b1"]);
   });
 
+  it("B arrives while A is shown -> A stays current", () => {
+    const a = mk({ status: "needs_you", pending: [approval("a1")] });
+    const b = mk({ status: "working" });
+    const bWaiting = { ...b, status: "needs_you" as const, pending: [approval("b1")] };
+    // Something was already pending: no jump, no alert.
+    expect(resolveFocus(a.id, [a, b], [a, bWaiting])).toEqual({ focusId: a.id, newlyPending: null });
+    // Even with focus on B (e.g. the user switched tabs), the card on screen stays at the head.
+    expect(pendingQueue([a, bWaiting], b.id, "a1").map((x) => x.item.requestId)).toEqual(["a1", "b1"]);
+    expect(pendingQueue([a, bWaiting], a.id, "a1")[0].item.requestId).toBe("a1");
+  });
+
+  it("A resolves -> B becomes current", () => {
+    const aDone = mk({ status: "working", pending: [] });
+    const b = mk({ status: "needs_you", pending: [approval("b1")] });
+    const queue = pendingQueue([aDone, b], aDone.id, "a1");
+    expect(queue.map((x) => x.item.requestId)).toEqual(["b1"]);
+    expect(queue[0].session.id).toBe(b.id);
+  });
+
   it("titles and status lines", () => {
     expect(sessionTitle(mk({ project: "pushdocs", branch: "PDD-1981" }))).toBe("pushdocs · PDD-1981");
     expect(sessionTitle(mk({ project: "x", branch: null }))).toBe("x");

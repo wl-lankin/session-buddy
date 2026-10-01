@@ -57,17 +57,29 @@ export function cycle(sessions: Session[], currentId: string | null, dir: 1 | -1
   return sessions[(i + dir + sessions.length) % sessions.length].id;
 }
 
+/**
+ * Focus jumps to a session that just started waiting only when nothing was pending before;
+ * otherwise the card the user is reading stays and the new item just joins the queue.
+ */
 export function resolveFocus(prevId: string | null, prev: Session[], next: Session[]): { focusId: string | null; newlyPending: string | null } {
   const before = new Map(prev.map((s) => [s.id, s.pending.length]));
-  const newly = next.find((s) => s.pending.length > 0 && (before.get(s.id) ?? 0) === 0);
+  const anyBefore = prev.some((s) => s.pending.length > 0);
+  const newly = anyBefore ? undefined : next.find((s) => s.pending.length > 0 && (before.get(s.id) ?? 0) === 0);
   if (newly) return { focusId: newly.id, newlyPending: newly.id };
   if (prevId && next.some((s) => s.id === prevId)) return { focusId: prevId, newlyPending: null };
   return { focusId: loudest(next)?.id ?? null, newlyPending: null };
 }
 
-export function pendingQueue(sessions: Session[], focusId: string | null): { session: Session; item: Interaction }[] {
+/**
+ * Everything waiting for the user. The card already on screen (`shownId`) stays at the head until it
+ * resolves; then the focused session's items, then the other sessions in list order.
+ */
+export function pendingQueue(sessions: Session[], focusId: string | null, shownId: string | null = null): { session: Session; item: Interaction }[] {
   const ordered = [...sessions].sort((a, b) => (a.id === focusId ? -1 : b.id === focusId ? 1 : 0));
-  return ordered.flatMap((session) => session.pending.map((item) => ({ session, item })));
+  const queue = ordered.flatMap((session) => session.pending.map((item) => ({ session, item })));
+  const i = shownId ? queue.findIndex((q) => q.item.requestId === shownId) : -1;
+  if (i > 0) queue.unshift(...queue.splice(i, 1));
+  return queue;
 }
 
 export const sessionTitle = (s: Session): string => (s.branch ? `${s.project} · ${s.branch}` : s.project);

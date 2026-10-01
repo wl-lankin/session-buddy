@@ -12,6 +12,8 @@ pub const OAUTH_EVERY_MS: i64 = 10 * 60_000;
 pub struct Limit {
     pub used_pct: f64,
     pub resets_at: Option<Value>,
+    /// "normal", "warning" or "critical" as the usage endpoint reports it; "normal" for status-line data.
+    pub severity: String,
 }
 
 /// One row of the limits block: "5H", "7D" or a scoped weekly limit such as "7D Fable".
@@ -65,7 +67,12 @@ pub struct Usage {
     pub extra: Option<Extra>,
     pub source: UsageSource,
     pub updated_at: Option<i64>,
+    /// Windows error: the last failed refresh or an empty status-line reading; cleared by the next good reading.
     pub error: Option<String>,
+    /// When the usage endpoint last answered; scoped limits and extra usage are as old as this.
+    pub oauth_updated_at: Option<i64>,
+    /// The usage endpoint's last error. Only a successful endpoint response clears it.
+    pub oauth_error: Option<String>,
     pub account: Option<Account>,
 }
 
@@ -81,15 +88,16 @@ pub struct Plan {
 pub fn parse_limit(v: &Value) -> Option<Limit> {
     let pct = v.get("used_percentage").or_else(|| v.get("utilization")).and_then(Value::as_f64)?;
     let resets_at = v.get("resets_at").filter(|r| !r.is_null()).cloned();
-    Some(Limit { used_pct: pct, resets_at })
+    let severity = v.get("severity").and_then(Value::as_str).unwrap_or("normal").to_string();
+    Some(Limit { used_pct: pct, resets_at, severity })
 }
 
 pub fn parse_limits(v: &Value) -> (Option<Limit>, Option<Limit>) {
     (v.get("five_hour").and_then(parse_limit), v.get("seven_day").and_then(parse_limit))
 }
 
-fn row_from(kind: &str, label: String, l: &Limit, severity: &str) -> LimitRow {
-    LimitRow { kind: kind.into(), label, used_pct: l.used_pct, resets_at: l.resets_at.clone(), severity: severity.into() }
+fn row_from(kind: &str, label: String, l: &Limit) -> LimitRow {
+    LimitRow { kind: kind.into(), label, used_pct: l.used_pct, resets_at: l.resets_at.clone(), severity: l.severity.clone() }
 }
 
 /// Reads the OAuth `limits` array. Returns `None` when the response has no such array.
@@ -121,8 +129,22 @@ pub fn parse_limit_rows(v: &Value) -> Option<Vec<LimitRow>> {
     Some(rows)
 }
 
+fn round_minor(v: &Value) -> Option<i64> {
+    v.as_i64().or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f.round() as i64))
+}
+
+/// An amount object `{amount_minor}` or a bare number; floats are rounded.
 fn minor(v: &Value) -> Option<i64> {
-    v.get("amount_minor").and_then(Value::as_i64).or_else(|| v.as_i64())
+    v.get("amount_minor").and_then(round_minor).or_else(|| round_minor(v))
+}
+
+/// Why extra usage is off, from the older `extra_usage` object: its reason, else "user_disabled".
+fn legacy_reason(v: &Value) -> Option<String> {
+    let e = v.get("extra_usage")?;
+    e.get("disabled_reason")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| e.get("user_disabled").and_then(Value::as_bool).filter(|d| *d).map(|_| "user_disabled".to_string()))
 }
 
 fn percent_of(used: i64, limit: Option<i64>) -> Option<f64> {
@@ -131,15 +153,17 @@ fn percent_of(used: i64, limit: Option<i64>) -> Option<f64> {
 
 /// Extra usage from `spend` (preferred) or the older `extra_usage` object.
 pub fn parse_extra(v: &Value) -> Option<Extra> {
-    if let Some(sp) = v.get("spend").filter(|s| s.get("used").is_some_and(Value::is_object)) {
-        let used = sp.get("used")?;
-        let used_minor = minor(used)?;
+    let spend = v.get("spend").and_then(|sp| Some((sp, sp.get("used").filter(|u| u.is_object())?, minor(sp.get("used")?)?)));
+    if let Some((sp, used, used_minor)) = spend {
         let limit_minor = sp.get("limit").filter(|l| !l.is_null()).and_then(minor);
         let currency = used.get("currency").and_then(Value::as_str).unwrap_or("USD").to_string();
         let exponent = used.get("exponent").and_then(Value::as_u64).unwrap_or(2) as u32;
         let percent = sp.get("percent").and_then(Value::as_f64).or_else(|| percent_of(used_minor, limit_minor));
-        let disabled_reason = sp.get("disabled_reason").and_then(Value::as_str).map(str::to_string);
         let enabled = sp.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+        let mut disabled_reason = sp.get("disabled_reason").and_then(Value::as_str).map(str::to_string);
+        if disabled_reason.is_none() && !enabled {
+            disabled_reason = legacy_reason(v);
+        }
         return Some(Extra { enabled, used_minor, limit_minor, currency, exponent, disabled_reason, percent });
     }
     let e = v.get("extra_usage").filter(|e| e.is_object())?;
@@ -149,11 +173,7 @@ pub fn parse_extra(v: &Value) -> Option<Extra> {
     let currency = e.get("currency").and_then(Value::as_str).unwrap_or("USD").to_string();
     let exponent = e.get("decimal_places").and_then(Value::as_u64).unwrap_or(2) as u32;
     let percent = e.get("utilization").and_then(Value::as_f64).or_else(|| percent_of(used_minor, limit_minor));
-    let disabled_reason = e
-        .get("disabled_reason")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| e.get("user_disabled").and_then(Value::as_bool).filter(|d| *d).map(|_| "user_disabled".to_string()));
+    let disabled_reason = legacy_reason(v);
     Some(Extra { enabled, used_minor, limit_minor, currency, exponent, disabled_reason, percent })
 }
 
@@ -191,10 +211,10 @@ fn sync_window_rows(u: &mut Usage) {
     u.limits.retain(|r| r.kind != "session" && r.kind != "weekly_all");
     let mut head = Vec::new();
     if let Some(l) = &u.five_hour {
-        head.push(row_from("session", "5H".into(), l, "normal"));
+        head.push(row_from("session", "5H".into(), l));
     }
     if let Some(l) = &u.seven_day {
-        head.push(row_from("weekly_all", "7D".into(), l, "normal"));
+        head.push(row_from("weekly_all", "7D".into(), l));
     }
     head.append(&mut u.limits);
     u.limits = head;
@@ -215,7 +235,7 @@ fn set_windows(u: &mut Usage, f: Option<Limit>, s: Option<Limit>) {
 pub fn apply_statusline(u: &mut Usage, v: &Value, at: i64) {
     let (f, s) = parse_limits(v);
     if f.is_none() && s.is_none() {
-        apply_error(u, "usage response had no limits".into());
+        u.error = Some("usage response had no limits".into());
         return;
     }
     set_windows(u, f, s);
@@ -230,7 +250,7 @@ pub fn apply_oauth(u: &mut Usage, v: &Value, at: i64) {
     let rows = parse_limit_rows(v);
     let (mut f, mut s) = parse_limits(v);
     if let Some(rows) = &rows {
-        let pick = |kind: &str| rows.iter().find(|r| r.kind == kind).map(|r| Limit { used_pct: r.used_pct, resets_at: r.resets_at.clone() });
+        let pick = |kind: &str| rows.iter().find(|r| r.kind == kind).map(|r| Limit { used_pct: r.used_pct, resets_at: r.resets_at.clone(), severity: r.severity.clone() });
         f = pick("session").or(f);
         s = pick("weekly_all").or(s);
     }
@@ -254,9 +274,14 @@ pub fn apply_oauth(u: &mut Usage, v: &Value, at: i64) {
         u.updated_at = Some(at);
     }
     u.error = None;
+    u.oauth_error = None;
+    u.oauth_updated_at = Some(at);
 }
 
+/// A failed endpoint refresh. Every value stays; the status line clears `error` on its next
+/// reading but not `oauth_error`, which tells the UI the scoped limits and extra usage are stale.
 pub fn apply_error(u: &mut Usage, err: String) {
+    u.oauth_error = Some(err.clone());
     u.error = Some(err);
 }
 
@@ -269,8 +294,8 @@ mod tests {
     fn parses_both_shapes() {
         let status = json!({"five_hour": {"used_percentage": 42.0, "resets_at": 1790000000}, "seven_day": {"used_percentage": 18}});
         let (f, s) = parse_limits(&status);
-        assert_eq!(f, Some(Limit { used_pct: 42.0, resets_at: Some(json!(1790000000)) }));
-        assert_eq!(s, Some(Limit { used_pct: 18.0, resets_at: None }));
+        assert_eq!(f, Some(Limit { used_pct: 42.0, resets_at: Some(json!(1790000000)), severity: "normal".into() }));
+        assert_eq!(s, Some(Limit { used_pct: 18.0, resets_at: None, severity: "normal".into() }));
         let oauth = json!({"five_hour": {"utilization": 7.5, "resets_at": "2026-10-01T14:30:00Z"}, "seven_day": null});
         let (f, s) = parse_limits(&oauth);
         assert_eq!(f.unwrap().resets_at, Some(json!("2026-10-01T14:30:00Z")));
@@ -447,6 +472,63 @@ mod tests {
         apply_statusline(&mut u, &json!({"five_hour": {"used_percentage": 9}}), 100 + STATUSLINE_FRESH_MS + 1);
         let rows: Vec<(&str, f64)> = u.limits.iter().map(|r| (r.label.as_str(), r.used_pct)).collect();
         assert_eq!(rows, [("5H", 9.0), ("7D", 30.0), ("7D Fable", 0.0), ("7D Design", 12.0)]);
+    }
+
+    #[test]
+    fn severity_from_the_endpoint_reaches_the_window_rows() {
+        let mut u = Usage::default();
+        let v = json!({"limits": [
+            {"kind": "session", "percent": 92, "severity": "critical", "resets_at": null},
+            {"kind": "weekly_all", "percent": 75, "severity": "warning", "resets_at": null}
+        ]});
+        apply_oauth(&mut u, &v, 5);
+        assert_eq!(u.limits[0].severity, "critical");
+        assert_eq!(u.limits[1].severity, "warning");
+        apply_statusline(&mut u, &json!({"five_hour": {"used_percentage": 10}}), 6);
+        assert_eq!(u.limits[0].severity, "normal", "status-line data carries no severity");
+        assert_eq!(u.limits[1].severity, "warning");
+    }
+
+    #[test]
+    fn extra_accepts_float_amounts_and_falls_back_when_spend_has_none() {
+        let floats = json!({"spend": {"used": {"amount_minor": 1239.6, "currency": "EUR", "exponent": 2}, "limit": {"amount_minor": 5000.0}, "enabled": true}});
+        let e = parse_extra(&floats).unwrap();
+        assert_eq!((e.used_minor, e.limit_minor), (1240, Some(5000)));
+        let broken = json!({
+            "spend": {"used": {"currency": "EUR"}, "enabled": true},
+            "extra_usage": {"is_enabled": true, "used_credits": 300, "monthly_limit": 1000, "currency": "EUR", "decimal_places": 2, "utilization": 30.0}
+        });
+        let e = parse_extra(&broken).unwrap();
+        assert_eq!((e.used_minor, e.limit_minor, e.percent), (300, Some(1000), Some(30.0)));
+    }
+
+    #[test]
+    fn a_missing_spend_reason_comes_from_extra_usage() {
+        let v = json!({
+            "spend": {"used": {"amount_minor": 0, "currency": "EUR", "exponent": 2}, "enabled": false, "disabled_reason": null},
+            "extra_usage": {"is_enabled": false, "user_disabled": true}
+        });
+        assert_eq!(parse_extra(&v).unwrap().disabled_reason.as_deref(), Some("user_disabled"));
+        let own = json!({"spend": {"used": {"amount_minor": 0, "currency": "EUR", "exponent": 2}, "enabled": false, "disabled_reason": "out_of_credits"}, "extra_usage": {"user_disabled": true}});
+        assert_eq!(parse_extra(&own).unwrap().disabled_reason.as_deref(), Some("out_of_credits"));
+        let on = json!({"spend": {"used": {"amount_minor": 5, "currency": "EUR", "exponent": 2}, "enabled": true}, "extra_usage": {"user_disabled": true}});
+        assert_eq!(parse_extra(&on).unwrap().disabled_reason, None);
+    }
+
+    #[test]
+    fn the_status_line_does_not_hide_an_endpoint_error() {
+        let mut u = Usage::default();
+        apply_oauth(&mut u, &real_response(), 5);
+        apply_error(&mut u, "usage endpoint returned 429".into());
+        apply_statusline(&mut u, &json!({"five_hour": {"used_percentage": 20}}), 9);
+        assert!(u.error.is_none(), "the windows are fine");
+        assert_eq!(u.oauth_error.as_deref(), Some("usage endpoint returned 429"));
+        assert_eq!(u.oauth_updated_at, Some(5));
+        apply_oauth(&mut u, &real_response(), 700_000);
+        assert!(u.oauth_error.is_none());
+        assert_eq!(u.oauth_updated_at, Some(700_000));
+        let v = serde_json::to_value(&u).unwrap();
+        assert_eq!(v["oauthUpdatedAt"], 700_000);
     }
 
     #[test]

@@ -9,10 +9,6 @@ const MAX_FIELD_LEN: usize = 2_000;
 /// ExitPlanMode's plan is shown on the island, so it may be longer than other fields.
 const MAX_PLAN_LEN: usize = 8_000;
 
-/// Finding the Claude Code process costs about 15 ms on Windows, so only the
-/// events that start, prompt and end a turn carry it (the status line does too).
-const PID_EVENTS: [&str; 3] = ["SessionStart", "UserPromptSubmit", "Stop"];
-
 pub struct Prepared {
     pub line: String,
     pub original: Value,
@@ -64,11 +60,10 @@ pub fn prepare(
         "sb_wait".into(),
         wait.map(|k| Value::String(k.as_str().into())).unwrap_or(Value::Null),
     );
-    let event = fmap.get("hook_event_name").and_then(Value::as_str).unwrap_or_default();
-    if PID_EVENTS.contains(&event) {
-        if let Some(pid) = claude_pid() {
-            fmap.insert("sb_claude_pid".into(), Value::from(pid));
-        }
+    // Every event carries the Claude Code pid: the per-hop lookup is cheap, and a
+    // session seen only through tool events still gets dropped when its process ends.
+    if let Some(pid) = claude_pid() {
+        fmap.insert("sb_claude_pid".into(), Value::from(pid));
     }
     let plan = if fwd.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") {
         fwd.pointer_mut("/tool_input/plan").map(Value::take)
@@ -177,20 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn claude_pid_only_on_turn_events() {
-        for event in ["SessionStart", "UserPromptSubmit", "Stop"] {
+    fn claude_pid_on_every_event() {
+        for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "SubagentStop", "Notification", "Stop"] {
             let p = prepare(br#"{"session_id":"s1"}"#, event, "", "", || Some(4242)).unwrap();
             assert_eq!(fwd(&p)["sb_claude_pid"], 4242, "{event}");
         }
-        let looked = std::cell::Cell::new(false);
-        let p = prepare(br#"{"hook_event_name":"PreToolUse","session_id":"s1"}"#, "", "", "", || {
-            looked.set(true);
-            Some(4242)
-        })
-        .unwrap();
-        assert!(fwd(&p).get("sb_claude_pid").is_none());
-        assert!(!looked.get(), "the process walk is skipped for other events");
-        let p = prepare(br#"{"session_id":"s1"}"#, "Stop", "", "", no_pid).unwrap();
+        let p = prepare(br#"{"session_id":"s1"}"#, "PreToolUse", "", "", no_pid).unwrap();
         assert!(fwd(&p).get("sb_claude_pid").is_none(), "no pid, no field");
     }
 

@@ -21,24 +21,20 @@ fn read_account() -> Option<Account> {
 }
 
 /// Read fresh on every fetch and never stored, so `/login` to another account is picked up.
+/// On macOS a leftover `.credentials.json` can sit next to the Keychain item Claude Code
+/// actually refreshes, so both are read and the one that expires last wins.
 fn read_token() -> Option<String> {
+    let mut candidates = Vec::new();
     if let Ok(bytes) = std::fs::read(sb_common::claude_dir().join(".credentials.json")) {
-        if let Some(t) = serde_json::from_slice::<Value>(&bytes).ok().and_then(|v| usage::token_from_credentials(&v)) {
-            return Some(t);
-        }
+        candidates.extend(serde_json::from_slice::<Value>(&bytes).ok());
     }
     #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("security")
-            .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
-            .output()
-            .ok()?;
+    if let Ok(out) = std::process::Command::new("security").args(["find-generic-password", "-s", "Claude Code-credentials", "-w"]).output() {
         if out.status.success() {
-            let v: Value = serde_json::from_slice(&out.stdout).ok()?;
-            return usage::token_from_credentials(&v);
+            candidates.extend(serde_json::from_slice::<Value>(&out.stdout).ok());
         }
     }
-    None
+    usage::freshest_token(&candidates)
 }
 
 async fn fetch(client: &reqwest::Client) -> Result<Value, String> {

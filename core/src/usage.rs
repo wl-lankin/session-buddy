@@ -201,6 +201,16 @@ pub fn token_from_credentials(v: &Value) -> Option<String> {
     v.pointer("/claudeAiOauth/accessToken").and_then(Value::as_str).filter(|t| !t.is_empty()).map(str::to_string)
 }
 
+/// The token that lives longest among several credential stores (file and Keychain).
+/// A store without `expiresAt` counts as oldest, so a leftover file never hides a fresh login.
+pub fn freshest_token(candidates: &[Value]) -> Option<String> {
+    candidates
+        .iter()
+        .filter_map(|v| Some((v.pointer("/claudeAiOauth/expiresAt").and_then(Value::as_i64).unwrap_or(i64::MIN), token_from_credentials(v)?)))
+        .max_by_key(|(exp, _)| *exp)
+        .map(|(_, t)| t)
+}
+
 pub fn decide(rate_limits: Option<&(Value, i64)>, last_fetch: i64, now: i64) -> Plan {
     let statusline = rate_limits.filter(|(_, at)| now - at < STATUSLINE_FRESH_MS).cloned();
     Plan { statusline, fetch: now - last_fetch >= OAUTH_EVERY_MS }
@@ -324,6 +334,17 @@ mod tests {
     fn token_from_credentials_json() {
         assert_eq!(token_from_credentials(&json!({"claudeAiOauth": {"accessToken": "sk-ant-oat-x"}})).as_deref(), Some("sk-ant-oat-x"));
         assert!(token_from_credentials(&json!({})).is_none());
+    }
+
+    #[test]
+    fn freshest_token_beats_a_stale_file() {
+        let stale = json!({"claudeAiOauth": {"accessToken": "old", "expiresAt": 1_000}});
+        let fresh = json!({"claudeAiOauth": {"accessToken": "new", "expiresAt": 2_000}});
+        let undated = json!({"claudeAiOauth": {"accessToken": "undated"}});
+        assert_eq!(freshest_token(&[stale.clone(), fresh.clone()]).as_deref(), Some("new"));
+        assert_eq!(freshest_token(&[fresh, stale.clone()]).as_deref(), Some("new"));
+        assert_eq!(freshest_token(&[undated, stale]).as_deref(), Some("old"));
+        assert!(freshest_token(&[json!({})]).is_none());
     }
 
     #[test]

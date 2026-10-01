@@ -1,4 +1,4 @@
-//! The island window: a fixed 800x400 transparent panel at the top centre of
+//! The island window: a fixed 960x400 transparent panel at the top centre of
 //! the screen. Outside the island shape it lets clicks through; a 30 Hz cursor
 //! feed drives Mochi's eyes and the hover logic.
 
@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 /// Keep in sync with src/core/layout.ts and tauri.conf.json.
-pub const PANEL_W: f64 = 800.0;
+pub const PANEL_W: f64 = 960.0;
 pub const PANEL_H: f64 = 400.0;
 pub const WINDOW_LABEL: &str = "island";
 

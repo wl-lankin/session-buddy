@@ -8,7 +8,7 @@ import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
 import type { Limit, Session, Usage } from "../core/types";
 import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens, level } from "../model/format";
-import { accountTitle, modelName, recentClass, recentCount, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import { accountTitle, agentGroups, emailParts, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, recentClass, recentCount, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { bar, keyed, linesChanged, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
@@ -49,7 +49,7 @@ function tabButtons(actions: ViewActions, sessions: Session[], focusId: string |
         },
       },
       h("span", { class: `sglyph ${s.status}`, style: `--c:${colorForProject(s.project)}`, text: statusGlyph(s.status) }),
-      h("span", { class: "tab-name", text: tabLabel(s.project, s.id === focusId, sessions.length) }),
+      h("span", { class: "tab-name", text: s.project }),
     ),
   );
 }
@@ -85,9 +85,11 @@ function header(s: Session): Node[] {
   ]);
 }
 
-/** Lets an email address break after "@" and ".", never in the middle of a word. */
+/** An email address may break only before its "@": "wolfgang.linz" / "@finodata.de". */
 function breakable(text: string): Node[] {
-  return text.split(/(?<=[@.])/).flatMap((part, i) => (i ? [h("wbr"), document.createTextNode(part)] : [document.createTextNode(part)]));
+  const parts = emailParts(text);
+  if (!parts) return [document.createTextNode(text)];
+  return [h("span", { class: "a-email-part", text: parts[0] }), h("wbr"), h("span", { class: "a-email-part", text: parts[1] })];
 }
 
 function limit(name: string, l: Limit | null, now: number): Node[] {
@@ -152,28 +154,59 @@ function stepsCol(s: Session): Node[] {
   ];
 }
 
-function sideCol(s: Session, now: number): Node[] {
+/** Sessions whose finished agents are unfolded in the agents column. */
+const openFinished = new Set<string>();
+
+function sideCol(actions: ViewActions, s: Session, now: number): Node[] {
   const out: Node[] = [];
-  const running = s.agents.filter((a) => a.running).length;
-  const sorted = [...s.agents].sort((a, b) => Number(b.running) - Number(a.running) || b.startedAt - a.startedAt);
-  const agents = sorted.slice(0, AGENT_ROWS);
-  out.push(h("div", { class: "x-h", text: `AGENTS (${running})` }));
-  if (!agents.length) out.push(h("div", { class: "x-none", text: "No sub-agents" }));
-  for (const a of agents) {
-    const what = a.running
-      ? a.currentStep ?? a.description ?? "starting"
-      : `${a.description ?? "done"} · ${fmtAgo(now - (a.endedAt ?? now))}`;
+  const { running, finished } = agentGroups(s.agents);
+  out.push(h("div", { class: "x-h", text: `AGENTS (${running.length})` }));
+  if (!running.length && !finished.length) out.push(h("div", { class: "x-none", text: "No sub-agents" }));
+  for (const a of running.slice(0, AGENT_ROWS)) {
     out.push(
       h(
         "div",
-        { class: `x-row ${a.running ? "run" : "done"}` },
-        h("span", { class: "x-icon", text: a.running ? "\u25CF" : "\u2713" }),
+        { class: "x-row run" },
+        h("span", { class: "x-icon", text: "\u25CF" }),
         h("span", { class: "x-atype", text: a.agentType }),
-        h("span", { class: "x-label", text: what }),
+        h("span", { class: "x-label", text: a.currentStep ?? a.description ?? "starting" }),
       ),
     );
   }
-  if (sorted.length > agents.length) out.push(h("div", { class: "x-none", text: `+${sorted.length - agents.length} more` }));
+  if (running.length > AGENT_ROWS) out.push(h("div", { class: "x-none", text: `+${running.length - AGENT_ROWS} more running` }));
+  if (finished.length) {
+    const open = openFinished.has(s.id);
+    out.push(
+      h(
+        "button",
+        {
+          class: `x-row done x-fold${open ? " open" : ""}`,
+          title: open ? "Hide the finished agents" : "Show the last finished agents",
+          onclick: (e: Event) => {
+            e.stopPropagation();
+            if (open) openFinished.delete(s.id);
+            else openFinished.add(s.id);
+            actions.redraw();
+          },
+        },
+        h("span", { class: "x-icon", text: "\u2713" }),
+        h("span", { class: "x-label", text: `${finished.length} finished` }),
+        h("span", { class: "x-chev", text: open ? "\u25B4" : "\u25BE" }),
+      ),
+    );
+    if (open) {
+      for (const a of finished.slice(0, FINISHED_AGENT_ROWS)) {
+        out.push(
+          h(
+            "div",
+            { class: "x-row done x-sub" },
+            h("span", { class: "x-label", text: finishedAgentLabel(a) }),
+            h("span", { class: "x-ago", text: fmtAgo(now - (a.endedAt ?? now)) }),
+          ),
+        );
+      }
+    }
+  }
   const agentIds = new Set(s.agents.map((a) => a.id));
   const bg = s.background.filter((b) => !agentIds.has(b.id));
   if (bg.length) {
@@ -234,7 +267,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       keyed(promptEl, prompt, () => (prompt ? [h("span", { class: "lbl", text: "Prompt " }), document.createTextNode(prompt)] : []));
       promptEl.title = s.lastPrompt ?? "";
       keyed(stepsEl, JSON.stringify([s.id, s.status, s.steps.slice(-STEP_ROWS)]), () => stepsCol(s));
-      keyed(sideEl, JSON.stringify([s.id, s.agents, s.background, minute]), () => sideCol(s, now));
+      keyed(sideEl, JSON.stringify([s.id, s.agents, s.background, minute, openFinished.has(s.id)]), () => sideCol(actions, s, now));
     },
   };
 }

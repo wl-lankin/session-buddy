@@ -23,6 +23,8 @@ export interface ViewActions {
   relayout(): void;
   /** The "Recent" pill: show or hide the recent sessions in the tab row. */
   toggleRecent(): void;
+  /** View-local state changed (e.g. a folded list): sync the views again. */
+  redraw(): void;
 }
 
 export interface ViewHost {

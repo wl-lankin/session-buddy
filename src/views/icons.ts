@@ -36,6 +36,8 @@ export const ICONS = {
   star: "M12 3.2l2.6 5.55 5.9.82-4.3 4.3 1.05 6.13L12 17.1l-5.25 2.9L7.8 13.87 3.5 9.57l5.9-.82L12 3.2z",
   // square.stack.fill
   stack: "M5 8h14v11.5H5V8zm1.8-3h10.4v1.6H6.8V5zm1.6-2.6h7.2V4H8.4V2.4z",
+  // git branch (stroke): trunk, a branch curving off it, three end points
+  branch: "M6 3.5v11 M18 9.5c0 4.5-4 6.5-9.5 7.5 M20.5 7a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z M8.5 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z",
   // doc.text
   doc: "M6.5 2.6h7l4 4v14.8h-11V2.6zm6.6 1.6v3.3h3.3l-3.3-3.3zM8.6 11h6.8v1.5H8.6V11zm0 3.4h6.8v1.5H8.6v-1.5z",
 } as const;

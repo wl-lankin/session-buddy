@@ -123,6 +123,7 @@ export class Island {
       openSettings: () => void Bridge.openSettingsWindow(),
       wantKeyboard: (on) => this.setKeyboard(on),
       relayout: () => this.animateGeometry(false),
+      redraw: () => State.notify(),
       toggleRecent: () => {
         State.showRecent = !State.showRecent;
         Sound.play("blip");

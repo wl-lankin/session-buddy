@@ -21,7 +21,7 @@
         "label": "island",
         "title": "Session Buddy",
         "url": "index.html",
-        "width": 800,
+        "width": 960,
         "height": 400,
         "resizable": false,
         "decorations": false,

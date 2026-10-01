@@ -1,5 +1,5 @@
 // Island geometry. All values are logical pixels. The window is a fixed
-// 800x400 transparent panel; the island is drawn inside it, glued to the top
+// 960x400 transparent panel; the island is drawn inside it, glued to the top
 // edge and horizontally centred.
 
 export type IslandMode = "strip" | "compact" | "expanded";
@@ -12,7 +12,7 @@ export type BotStateName =
 export type BotEmoteName = "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed";
 
 /** Keep in sync with src-tauri/src/island.rs and tauri.conf.json. */
-export const PANEL_W = 800;
+export const PANEL_W = 960;
 export const PANEL_H = 400;
 
 // The launch greeting animates out of a notch-sized shape (src/mochi/greeting.ts).
@@ -27,7 +27,7 @@ export const STRIP_MAX_W = 600;
 export const STRIP_H = 28;
 export const COMPACT_ISLAND_W = 480;
 export const COMPACT_H = 64;
-export const EXPANDED_W = 760;
+export const EXPANDED_W = 920;
 
 export const ROUNDED_CORNER = 14;
 export const EXPANDED_CORNER = 22;
@@ -67,6 +67,8 @@ export function botPosition(mode: IslandMode, view: IslandViewName): BotPlacemen
       return { cx: 34, cy: 32, diameter: 38, opacity: 1 };
     case "expanded":
       if (view === "greeting") return { cx: 320, cy: 90, diameter: 0, opacity: 0 };
+      // The session view's tab row spans the whole island: Buddy sits below it.
+      if (view === "session") return { cx: 56, cy: 112, diameter: 58, opacity: 1 };
       return { cx: 56, cy: 96, diameter: 58, opacity: 1 };
   }
 }

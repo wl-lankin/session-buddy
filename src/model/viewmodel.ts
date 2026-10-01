@@ -1,7 +1,7 @@
 // Pure functions from sessions to what the island shows. No DOM, no state.
 
 import type { BotStateName } from "../core/layout";
-import type { Interaction, Question, Session, Status, Usage } from "../core/types";
+import type { Agent, Interaction, Question, Session, Status, Usage } from "../core/types";
 import { firstLine, fmtDuration, fmtPct, level, type Level } from "./format";
 
 export const STATUS_RANK: Record<Status, number> = {
@@ -144,6 +144,12 @@ export function accountLabel(u: Usage): string {
   return [a.email, a.plan].filter(Boolean).join(" · ");
 }
 
+/** "wolfgang.linz@finodata.de" -> ["wolfgang.linz", "@finodata.de"]: the only place the address may wrap. */
+export function emailParts(email: string): [string, string] | null {
+  const at = email.indexOf("@");
+  return at > 0 ? [email.slice(0, at), email.slice(at)] : null;
+}
+
 export function accountTitle(u: Usage): string {
   const a = u.account;
   if (!a) return "";
@@ -177,11 +183,26 @@ export const recentCount = (sessions: Session[]): number => sessions.filter((s) 
 /** Recent sessions (no event since the app started) are shown dimmed. */
 export const recentClass = (s: Session): string => (s.live ? "" : " recent");
 
-/** More sessions than this and inactive tabs shrink to glyph plus three characters. */
+/** More sessions than this and inactive tabs get tighter padding; their names shrink to fit the row. */
 export const TAB_COMPACT_ABOVE = 5;
 
-export function tabLabel(project: string, active: boolean, total: number): string {
-  return active || total <= TAB_COMPACT_ABOVE ? project : Array.from(project).slice(0, 3).join("");
+/** The agents column: running agents newest first, finished ones newest first. */
+export function agentGroups(agents: Agent[]): { running: Agent[]; finished: Agent[] } {
+  const newest = (a: Agent, b: Agent) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt) || b.startedAt - a.startedAt;
+  return {
+    running: agents.filter((a) => a.running).sort((a, b) => b.startedAt - a.startedAt),
+    finished: agents.filter((a) => !a.running).sort(newest),
+  };
+}
+
+/** How many finished agents the unfolded summary lists. */
+export const FINISHED_AGENT_ROWS = 5;
+
+/** A finished agent's row: its description, else its type ("agent" only when nothing better is known). */
+export function finishedAgentLabel(a: Agent): string {
+  const d = a.description?.trim();
+  if (d) return a.agentType && a.agentType !== "agent" ? `${a.agentType} · ${d}` : d;
+  return a.agentType || "agent";
 }
 
 /** AskUserQuestion `answers`: one string per question, multi-select joined with ", ". Null while incomplete. */

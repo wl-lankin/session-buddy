@@ -420,6 +420,9 @@ body {
 }
 .session-view { display: flex; flex-direction: column; gap: 8px; height: 100%; }
 
+/* The tab row spans the whole island from its left edge; the blocks below leave room for Buddy. */
+.view.session-view { left: -96px; }
+.session-view .x-main { margin-left: 96px; }
 .x-tabs-blk { flex: 0 0 auto; padding: 4px; }
 .x-tabs { display: flex; gap: 4px; overflow: hidden; height: 22px; }
 .x-tabs .tab {
@@ -440,14 +443,15 @@ body {
   font: 500 11.5px var(--font);
   cursor: pointer;
 }
-.x-tabs .tab.on { background: var(--tab-on); color: var(--ink); flex: 0 0 auto; max-width: 180px; }
-.x-tabs .tab.many:not(.on) { padding: 0 7px; gap: 4px; max-width: 56px; }
+.x-tabs .tab:not(.on):not(.recent-pill) { min-width: 40px; }
+.x-tabs .tab.on { background: var(--tab-on); color: var(--ink); flex: 0 0 auto; max-width: 200px; }
+.x-tabs .tab.many:not(.on) { padding: 0 7px; gap: 4px; }
 .x-tabs .tab:hover { color: var(--ink-2); }
 .x-tabs .recent-pill { flex: 0 0 auto; max-width: none; margin-left: auto; padding: 0 8px; font-size: 10.5px; color: var(--dim-3); background: rgba(255, 255, 255, 0.04); }
 .x-tabs .recent-pill.on { background: rgba(255, 255, 255, 0.09); color: var(--dim); }
 .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.x-main { display: grid; grid-template-columns: minmax(0, 1fr) 150px; grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
+.x-main { display: grid; grid-template-columns: minmax(0, 1fr) 190px; grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1 1 auto; min-height: 0; }
 
 .x-session { display: flex; flex-direction: column; padding: 9px 12px 8px; min-height: 0; overflow: hidden; }
 .x-head { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
@@ -471,18 +475,28 @@ body {
 .x-row.run .x-icon { color: var(--green-2); animation: sb-breathe 1.6s ease-in-out infinite; }
 .x-label { font: 500 12px var(--font); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .x-atype { font: 600 11px var(--font); color: var(--dim-2); flex: 0 0 auto; }
+.x-fold { width: 100%; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; font: inherit; }
+.x-fold:hover .x-label, .x-fold:hover .x-chev { color: var(--ink-2); }
+.x-fold .x-icon { color: var(--green-2); }
+.x-chev { flex: 0 0 auto; font: 400 9px var(--font); color: var(--dim-4); }
+.x-sub { padding-left: 16px; }
+.x-ago { margin-left: auto; padding-left: 6px; flex: 0 0 auto; font: 400 10.5px var(--font); color: var(--dim-4); }
 .x-none { font: 400 11.5px var(--font); color: var(--dim-4); height: 20px; line-height: 20px; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Project name shrinks; the branch chip stays readable. */
+.branch svg { flex: 0 0 auto; opacity: 0.8; }
+.branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sname { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .sname-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch {
   flex: 0 0 auto;
-  max-width: 24ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 26ch;
+  min-width: 0;
   white-space: nowrap;
-  padding: 1px 6px;
+  padding: 1px 6px 1px 5px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.06);
   font: 500 10.5px var(--mono);
@@ -511,7 +525,9 @@ body {
   overflow-wrap: anywhere;
 }
 .a-account { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--block-edge); display: flex; flex-direction: column; gap: 2px; }
-.a-email { font: 500 11px/1.35 var(--font); color: var(--dim-2); overflow-wrap: anywhere; }
+.a-email { font: 500 11px/1.35 var(--font); color: var(--dim-2); }
+/* Only the <wbr> before "@" is a break; a part longer than the block still wraps as a last resort. */
+.a-email-part { overflow-wrap: anywhere; }
 .a-plan { font: 600 10.5px var(--font); color: var(--dim-3); }
 
 /* ── Finished card ───────────────────────────────────────────────────── */

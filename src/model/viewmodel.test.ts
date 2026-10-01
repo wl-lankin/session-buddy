@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Interaction, Session, Usage } from "../core/types";
+import type { Agent, Interaction, Session, Usage } from "../core/types";
 import {
   accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue, recentClass,
-  recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, tabLabel, visibleSessions,
+  agentGroups, emailParts, finishedAgentLabel, recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, visibleSessions,
 } from "./viewmodel";
 
 let n = 0;
@@ -178,11 +178,32 @@ describe("viewmodel", () => {
     expect(ordered[0].id).toBe(b.id);
   });
 
-  it("tab labels shrink for inactive tabs above five sessions", () => {
-    expect(tabLabel("pushdocs", false, 5)).toBe("pushdocs");
-    expect(tabLabel("pushdocs", false, 6)).toBe("pus");
-    expect(tabLabel("pushdocs", true, 9)).toBe("pushdocs");
-    expect(tabLabel("ab", false, 9)).toBe("ab");
+  it("an email splits only before the @", () => {
+    expect(emailParts("wolfgang.linz@finodata.de")).toEqual(["wolfgang.linz", "@finodata.de"]);
+    expect(emailParts("no-at-sign")).toBeNull();
+    expect(emailParts("@odd")).toBeNull();
+  });
+
+  it("groups agents: running newest first, finished newest first", () => {
+    const ag = (id: string, p: Partial<Agent>): Agent => ({ id, agentType: "Explore", description: null, running: false, currentStep: null, startedAt: 0, endedAt: null, ...p });
+    const { running, finished } = agentGroups([
+      ag("r1", { running: true, startedAt: 1 }),
+      ag("f1", { endedAt: 10, startedAt: 2 }),
+      ag("r2", { running: true, startedAt: 5 }),
+      ag("f2", { endedAt: 30, startedAt: 3 }),
+    ]);
+    expect(running.map((a) => a.id)).toEqual(["r2", "r1"]);
+    expect(finished.map((a) => a.id)).toEqual(["f2", "f1"]);
+    expect(agentGroups([])).toEqual({ running: [], finished: [] });
+  });
+
+  it("a finished agent reads as its description, else its type, never the generic agent when the type is known", () => {
+    const ag = (agentType: string, description: string | null): Agent => ({ id: "a", agentType, description, running: false, currentStep: null, startedAt: 0, endedAt: 1 });
+    expect(finishedAgentLabel(ag("Explore", "Find callers"))).toBe("Explore · Find callers");
+    expect(finishedAgentLabel(ag("agent", "Find callers"))).toBe("Find callers");
+    expect(finishedAgentLabel(ag("Plan", null))).toBe("Plan");
+    expect(finishedAgentLabel(ag("Plan", "  "))).toBe("Plan");
+    expect(finishedAgentLabel(ag("agent", null))).toBe("agent");
   });
 
   it("maps raw model ids to display names", () => {

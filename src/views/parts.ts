@@ -1,6 +1,7 @@
 // Small building blocks shared by the views.
 
-import { h, clear } from "./dom";
+import { h, clear, svg } from "./dom";
+import { ICONS } from "./icons";
 import { colorForProject } from "../core/layout";
 import type { Session } from "../core/types";
 import { fmtAdded, fmtRemoved, level } from "../model/format";
@@ -32,12 +33,17 @@ export function linesChanged(added: number, removed: number): Node[] {
   return [h("span", { class: "ln-add", text: fmtAdded(added) }), document.createTextNode(" "), h("span", { class: "ln-del", text: fmtRemoved(removed) })];
 }
 
+/** The branch chip: a git-branch glyph and the branch name. */
+export function branchChip(branch: string): HTMLElement {
+  return h("span", { class: "branch" }, svg(ICONS.branch, 10, { stroke: 2.4 }), h("span", { class: "branch-name", text: branch }));
+}
+
 /** Project name (shrinks with an ellipsis) and the branch as its own chip that stays visible. */
 export function sessionName(s: Session, cls = ""): HTMLElement {
   return h(
     "span",
     { class: `sname ${cls}`.trim(), title: sessionTitle(s) },
     h("span", { class: "sname-project", text: s.project }),
-    s.branch ? h("span", { class: "branch", text: s.branch }) : null,
+    s.branch ? branchChip(s.branch) : null,
   );
 }

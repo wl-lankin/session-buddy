@@ -180,7 +180,7 @@ fn screen_key(app: &AppHandle) -> Option<(i32, i32, u32, u32, u64)> {
     Some((p.x, p.y, s.width, s.height, m.scale_factor().to_bits()))
 }
 
-/// Clicking the island must never steal focus from Warp.
+/// Clicking the island must never steal focus from the terminal.
 pub fn prepare(win: &WebviewWindow) {
     #[cfg(windows)]
     win32::make_non_activating(win);

@@ -54,7 +54,7 @@ export function buildViews(actions: ViewActions): Map<IslandViewName, ViewHost> 
     ["interaction", buildInteraction(actions)],
     ["plan", buildPlan(actions)],
     ["finished", buildFinished(actions)],
-    ["empty", simple("empty-view", "No Claude Code sessions yet", "Start claude in Warp or any terminal. Sessions appear here on their first event.")],
+    ["empty", simple("empty-view", "No Claude Code sessions yet", "Start claude in any terminal. Sessions appear here on their first event.")],
     ["confused", simple("confused-view", "Ouch.", "Give Buddy a second.")],
     ["greeting", { el: h("div", { class: "view" }), sync() {} }],
   ]);

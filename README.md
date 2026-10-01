@@ -8,7 +8,7 @@
 
 ## Why
 
-When you run several Claude Code sessions in Warp at once, one of them is always waiting for you: a permission prompt, a question, a "shall I go on?". You only notice when you happen to click on that tab. Session Buddy sits at the top edge of your screen, shows what every session is doing, and pops open the moment one needs you. You answer right there, or send it back to the terminal.
+When you run several Claude Code sessions in a terminal at once, one of them is always waiting for you: a permission prompt, a question, a "shall I go on?". You only notice when you happen to click on that tab. Session Buddy sits at the top edge of your screen, shows what every session is doing, and pops open the moment one needs you. You answer right there, or send it back to the terminal.
 
 ## Features
 

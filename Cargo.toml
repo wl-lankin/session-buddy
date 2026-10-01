@@ -1,0 +1,21 @@
+[workspace]
+members = ["common", "hook", "core", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+# The relay starts on every Claude Code event: optimise for size and start-up.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
+# Only the relay aborts on panic (it must never hang Claude Code); the app unwinds,
+# so a panic in one task does not take the island down. Output: target/relay/.
+[profile.relay]
+inherits = "release"
+panic = "abort"

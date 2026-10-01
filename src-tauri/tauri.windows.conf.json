@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": { "../target/relay/sb-relay.exe": "sb-relay.exe" },
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  }
+}

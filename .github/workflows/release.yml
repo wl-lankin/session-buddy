@@ -1,0 +1,79 @@
+# Builds the installers and attaches them to a draft GitHub release.
+# Push a tag like v1.0.0 (normal release) or v1.0.0-beta.1 (prerelease), or run it
+# by hand with a tag name. The bundle version always comes from tauri.conf.json
+# (NSIS needs a numeric version, so a beta tag still ships 1.0.0).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.0.0 or v1.0.0-beta.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin --config src-tauri/tauri.universal.conf.json"
+    runs-on: ${{ matrix.platform }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the relay (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: cargo build --profile relay -p sb-relay
+
+      # npm run build (the beforeBuildCommand) rebuilds target/relay/sb-relay for the
+      # host only, so the universal relay lives in its own folder and an extra
+      # config points the bundle at it.
+      - name: Build the universal relay (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          cargo build --profile relay -p sb-relay --target aarch64-apple-darwin
+          cargo build --profile relay -p sb-relay --target x86_64-apple-darwin
+          mkdir -p target/relay-universal
+          lipo -create -output target/relay-universal/sb-relay \
+            target/aarch64-apple-darwin/relay/sb-relay \
+            target/x86_64-apple-darwin/relay/sb-relay
+          lipo -info target/relay-universal/sb-relay
+          cat > src-tauri/tauri.universal.conf.json <<'EOF'
+          {"bundle": {"resources": {"../target/relay/sb-relay": null, "../target/relay-universal/sb-relay": "sb-relay"}}}
+          EOF
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ env.TAG }}
+          releaseName: "Session Buddy ${{ env.TAG }}"
+          releaseBody: "Unsigned builds. Windows: SmartScreen > More info > Run anyway. macOS: right-click the app > Open once, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`."
+          releaseDraft: true
+          prerelease: ${{ contains(env.TAG, '-') }}
+          args: ${{ matrix.args }}

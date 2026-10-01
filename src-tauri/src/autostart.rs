@@ -1,17 +1,13 @@
-//! Start-up entry upkeep. tauri-plugin-autostart names the entry after the
-//! product name (`package_info().name`): the Windows Run value and the macOS
-//! LaunchAgent were "session-buddy" before the rename and are "Session Buddy"
-//! now. On start-up the current entry is written again (when autostart is on)
-//! and an old "session-buddy" entry that starts this app is removed, so the app
-//! never starts twice and turning autostart off really turns it off.
+//! Start-up entry upkeep. The plugin names the entry after the product name, which
+//! was "session-buddy" before the rename and is "Session Buddy" now. On start-up the
+//! current entry is rewritten (when autostart is on) and an old "session-buddy" entry
+//! that starts this app is removed, so the app never starts twice.
 
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 
-/// The entry name the plugin used before the product name changed.
 pub const LEGACY_NAME: &str = "session-buddy";
 
-/// True when a start-up command (Run value or plist text) launches Session Buddy.
 pub fn launches_us(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
     lower.contains("session-buddy") || lower.contains("session buddy")

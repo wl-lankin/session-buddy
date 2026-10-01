@@ -238,7 +238,6 @@ mod tests {
 
     const ACK: &str = r#"{"sb_ack":true}"#;
 
-    /// Every line the relay receives until the hub closes the connection.
     async fn read_lines(client: tokio::io::DuplexStream) -> Vec<String> {
         let mut lines = BufReader::new(client).lines();
         let mut out = Vec::new();

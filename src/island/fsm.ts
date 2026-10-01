@@ -22,8 +22,6 @@ export class IslandStateMachine {
   private homeCollapse: number | null = null;
   private greetCollapse: number | null = null;
 
-  // ── Inputs ──────────────────────────────────────────────────────────────────
-
   launch() {
     this.cancelTimers();
     this.transition("coucou");
@@ -95,8 +93,6 @@ export class IslandStateMachine {
     this.cancelTimers();
     this.transition("petit");
   }
-
-  // ── Timers ──────────────────────────────────────────────────────────────────
 
   private scheduleCompactRest() {
     this.clear("compactRest");

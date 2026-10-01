@@ -28,7 +28,6 @@ const BOT_OVERHANG = 40;
 const HIT_MARGIN = 14;
 const FLASH_MS = 6000;
 const WHEEL_GAP_MS = 180;
-/** The grip resizes once the pointer moved this far. */
 const DRAG_START_PX = 4;
 /** Step rows are 20 px: the views re-sync when the height crosses one. */
 const ROW_STEP_PX = 20;
@@ -44,7 +43,6 @@ const MEASURED_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
 /** Views the grip and the enlarge button can make taller. */
 const SIZABLE_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
 
-/** The screen the island is on, logical pixels. */
 function screenSize(): Screen {
   const s = typeof window !== "undefined" ? window.screen : undefined;
   return { w: s?.width || 1920, h: s?.height || 1080 };
@@ -112,7 +110,6 @@ export class Island {
   /** What the manual size belongs to; it resets when that changes. */
   private sizeAnchor: SizeAnchor & { view: IslandViewName } = { focusId: null, requestId: null, view: "session" };
   private lastPointerAt = performance.now();
-  /** A grip drag in progress. */
   private heightBucket = 0;
   private wasResizing = false;
   private drag: { pointerId: number; startY: number; startH: number; active: boolean } | null = null;
@@ -129,8 +126,6 @@ export class Island {
       this.ensureRunning();
     });
   }
-
-  // -- DOM ------------------------------------------------------------------
 
   private actions(): ViewActions {
     return {
@@ -198,8 +193,6 @@ export class Island {
     this.applyGeometry();
   }
 
-  // -- FSM ------------------------------------------------------------------
-
   private wireFsm() {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
     this.fsm.compactToStripDelay = State.settings.compactInterval;
@@ -238,8 +231,6 @@ export class Island {
     // Recent sessions alone still open the session view: its "Recent" pill shows them.
     return State.allSessions.length ? "session" : "empty";
   }
-
-  // -- Mode / view ----------------------------------------------------------
 
   private setMode(mode: IslandMode) {
     const prev = State.mode;
@@ -344,8 +335,6 @@ export class Island {
   private leavePlanIfGone() {
     if (State.mode === "expanded" && State.view === "plan" && !planSession(State.sessions, State.focusId)) this.setView("session");
   }
-
-  // -- Data from Rust -------------------------------------------------------
 
   onSnapshot(snap: Snapshot) {
     const prev = State.sessions;
@@ -459,8 +448,6 @@ export class Island {
     }
   }
 
-  // -- Geometry -------------------------------------------------------------
-
   /** A MacBook notch (top and width in logical pixels, zero without one): the strip moves beside it. */
   setNotch(top: number, width: number) {
     if (top === this.notch.top && width === this.notch.width) return;
@@ -490,8 +477,6 @@ export class Island {
     return { w: natural.w, h, r: State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER };
   }
 
-  // -- Manual size ----------------------------------------------------------
-
   private currentAnchor(): SizeAnchor & { view: IslandViewName } {
     const requestId = State.view === "interaction" ? (this.views.get("interaction")?.anchorId?.() ?? null) : null;
     return { focusId: State.focus?.id ?? null, requestId, view: State.view };
@@ -503,7 +488,6 @@ export class Island {
     this.lastPointerAt = performance.now();
   }
 
-  /** The enlarge button: natural size <-> large reading size. */
   private toggleEnlarge() {
     Sound.play("blip");
     if (State.manualH != null) {
@@ -587,7 +571,6 @@ export class Island {
     });
   }
 
-  /** A grip drag that has moved far enough to resize. */
   private get dragging(): boolean {
     return this.drag?.active === true;
   }
@@ -625,7 +608,6 @@ export class Island {
     else void Bridge.setPanelSize(want.w, want.h);
   }
 
-  /** Re-measures the auto width; springs to it when it changed. */
   private refreshAutoWidth() {
     if (State.mode !== "expanded") return;
     const needs = this.views.get("session")?.needs?.() ?? [];
@@ -647,7 +629,6 @@ export class Island {
       else t.springTo(to);
     };
     move(this.width, this.target.w, next.w);
-    // While the grip is dragged the height follows the pointer, not a spring.
     if (!this.dragging) move(this.height, this.target.h, next.h);
     move(this.radius, this.target.r, next.r);
     this.target = next;
@@ -688,8 +669,6 @@ export class Island {
     const top = this.notch.top;
     return { x: (this.viewportW() - w) / 2, y: -top, w, h: this.height.value + top };
   }
-
-  // -- Input ----------------------------------------------------------------
 
   private wireInput() {
     this.wireGrip();
@@ -844,8 +823,6 @@ export class Island {
     }, 3300);
   }
 
-  // -- Frame loop -----------------------------------------------------------
-
   private ensureRunning() {
     if (this.running) return;
     this.running = true;
@@ -981,8 +958,6 @@ export class Island {
     const remaining = (this.homeCollapseAt - nowMs) / 1000;
     this.countdown.style.width = remaining < windowS ? `${Math.max(0, clamp(remaining / windowS, 0, 1) * 160)}px` : "0px";
   }
-
-  // -- DOM sync -------------------------------------------------------------
 
   private syncDom() {
     const expanded = State.mode === "expanded";

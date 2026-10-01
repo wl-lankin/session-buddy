@@ -96,7 +96,6 @@ mod win_peb {
     const PARAMS_CMDLINE: usize = 0x70;
     const PARAMS_READ: usize = 0x80;
 
-    /// Only claude and node can be Claude Code; nothing else is opened.
     pub fn worth_reading(exe: &str) -> bool {
         sb_core::adopt::is_claude_process(exe, Some("claude"))
     }
@@ -107,7 +106,6 @@ mod win_peb {
         pub image: Option<String>,
     }
 
-    /// Command line, working directory and full image path of a process of the user `me`; None for other users.
     pub fn read_process(pid: u32, me: &str) -> Option<Read> {
         // SAFETY: the handle is closed on every path below.
         let process = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid) }.ok()?;
@@ -171,7 +169,6 @@ mod win_peb {
         (got == N).then_some(buf)
     }
 
-    /// The UNICODE_STRING at `offset` of the parameter block, read from the other process.
     fn unicode_at(process: HANDLE, block: &[u8; PARAMS_READ], offset: usize) -> Option<String> {
         let len = u16::from_le_bytes([block[offset], block[offset + 1]]) as usize;
         let addr = usize::from_le_bytes(block[offset + 8..offset + 16].try_into().ok()?);
@@ -325,7 +322,6 @@ mod mac {
         buf.truncate(size);
         let argc = i32::from_ne_bytes(buf[..4].try_into().ok()?).max(0) as usize;
         let rest = &buf[4..];
-        // Skip the executable path and the NUL padding after it.
         let path_end = rest.iter().position(|&b| b == 0)?;
         let args_start = path_end + rest[path_end..].iter().position(|&b| b != 0)?;
         let args: Vec<String> = rest[args_start..]

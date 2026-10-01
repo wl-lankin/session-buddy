@@ -49,7 +49,7 @@ class SoundEngine {
     return this.loading;
   }
 
-  /** WebView2 can hand us a suspended context; call after any user input. */
+  /** The WebView can hand us a suspended context; call after any user input. */
   resume() {
     if (this.idleTimer != null) {
       window.clearTimeout(this.idleTimer);

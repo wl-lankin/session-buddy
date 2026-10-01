@@ -17,7 +17,6 @@ pub const PANEL_H: f64 = 440.0;
 /// The panel size the front end asked for, logical pixels (see `set_panel_size`).
 static PANEL: Mutex<(f64, f64)> = Mutex::new((PANEL_W, PANEL_H));
 
-/// The monitor (position and scale) the window was last placed on.
 static LAST_MONITOR: Mutex<Option<(i32, i32, u64)>> = Mutex::new(None);
 
 /// The notch of the screen the island is on, logical pixels; `None` without one.
@@ -32,7 +31,6 @@ pub struct Notch {
     pub width: f64,
 }
 
-/// The notch the front end should draw, emitted as "notch" after every placement.
 #[derive(Clone, Copy, Serialize)]
 struct NotchPayload {
     top: f64,

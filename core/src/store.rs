@@ -325,7 +325,6 @@ impl Session {
         }
     }
 
-    /// Sub-agents or background tasks still running.
     fn busy(&self) -> bool {
         self.agents.iter().any(|a| a.running) || self.background.iter().any(|b| b.status == "running")
     }
@@ -647,7 +646,7 @@ impl Store {
             };
             sess.status = Status::Idle; // force set_status to stamp status_since
             if next == Status::Thinking {
-                sess.turn_started_at = Some(now); // a reply starts a new turn
+                sess.turn_started_at = Some(now);
             }
             sess.set_status(next, now);
             return Some(sess.id.clone());
@@ -695,7 +694,6 @@ impl Store {
         self.sessions.len() != before
     }
 
-    /// True while a seeded session waits for a process to claim it.
     pub fn has_unclaimed_seeds(&self) -> bool {
         self.sessions.values().any(|s| !s.live && s.pid.is_none())
     }
@@ -729,7 +727,6 @@ impl Store {
         !pairs.is_empty()
     }
 
-    /// How many of `procs` some session holds.
     pub fn count_held(&self, procs: &[ClaudeProcess]) -> usize {
         procs.iter().filter(|p| self.sessions.values().any(|s| s.pid == Some(p.pid))).count()
     }
@@ -1236,7 +1233,6 @@ mod tests {
         let running = json!([{"id": "a1", "type": "subagent", "status": "running", "description": "d"}]);
         let cues = st.apply_hook(&ev("Stop", json!({"background_tasks": running})), T0 + 5_000);
         assert!(cues[0].busy);
-        // One of two agents ends: not done yet.
         st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a2"})), T0 + 6_000);
         let cues = st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a2", "background_tasks": running})), T0 + 7_000);
         assert!(cues.is_empty(), "a background task still runs");
@@ -1258,7 +1254,6 @@ mod tests {
         let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 60_000);
         assert_eq!(cues[0].turn_ms, Some(60_000));
         assert!(!cues[0].busy);
-        // A new typed prompt starts from scratch.
         st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "next"})), T0 + 100_000);
         let cues = st.apply_hook(&ev("Stop", json!({})), T0 + 103_000);
         assert_eq!(cues[0].turn_ms, Some(3_000));
@@ -1514,7 +1509,6 @@ mod tests {
         assert!(st.get("x").unwrap().live);
         assert_eq!(st.get("x").unwrap().pid, Some(42));
         assert_eq!(st.snapshot().iter().filter(|s| s.live).count(), 1, "only x is live");
-        // The status line claims a pid the same way.
         st.apply_statusline(&json!({"session_id": "z", "sb_claude_pid": 42}), T0 + 3);
         assert_eq!(st.get("x").unwrap().pid, None);
         assert!(!st.get("x").unwrap().live);

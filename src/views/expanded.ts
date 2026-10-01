@@ -4,7 +4,8 @@
 // positioned, so lines can never overlap. The tab row, the header, the cwd and
 // the account never truncate: the island widens for them (needs()).
 
-import { h } from "./dom";
+import { h, svg } from "./dom";
+import { ICONS } from "./icons";
 import { colorForProject, VIEW_HEIGHT_SESSION } from "../core/layout";
 import { State } from "../core/state";
 import type { Extra, LimitRow, Session, Step, StepDetail, Usage } from "../core/types";
@@ -84,11 +85,17 @@ function header(s: Session): Node[] {
       { class: "x-title" },
       statusDot(s),
       sessionName(s, "x-name"),
-      s.model ? h("span", { class: "x-model", text: modelName(s.model) }) : null,
+      s.model ? h("span", { class: "x-model" }, claudeMark(), modelName(s.model)) : null,
     ),
     h("div", { class: "x-cwd", text: s.cwd, title: s.cwd }),
     meta.length ? h("div", { class: "x-meta" }, ...meta) : null,
   ]);
+}
+
+function claudeMark(): Node {
+  const mark = svg(ICONS.claude, 12, { stroke: 2.4 });
+  mark.setAttribute("class", "claude-mark");
+  return mark;
 }
 
 /** An email address may break only before its "@": "wolfgang.linz" / "@finodata.de". */

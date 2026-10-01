@@ -3,10 +3,10 @@
 
 import type { Session } from "../core/types";
 
-/** The session whose plan the island shows: none while a real interaction waits; the focused session first. */
+/** The focused session when it has a plan to show; none while a real interaction waits anywhere. */
 export function planSession(sessions: Session[], focusId: string | null): Session | null {
   if (sessions.some((s) => s.pending.length > 0)) return null;
-  return sessions.find((s) => s.id === focusId && s.plan != null) ?? sessions.find((s) => s.plan != null) ?? null;
+  return sessions.find((s) => s.id === focusId && s.plan != null) ?? null;
 }
 
 /** A session whose plan just appeared or changed: the island plays the sound and opens the card once. */

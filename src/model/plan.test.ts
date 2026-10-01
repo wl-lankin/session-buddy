@@ -12,15 +12,15 @@ const sess = (id: string, plan: string | null, pending: Interaction[] = []): Ses
 const approval: Interaction = { kind: "approval", requestId: "r1", tool: "Bash", target: "ls", agentId: null, deadline: 0 };
 
 describe("planSession", () => {
-  it("prefers the focused session, then any session with a plan", () => {
+  it("only the focused session's plan: another session's plan never takes over", () => {
     const list = [sess("a", "plan a"), sess("b", "plan b"), sess("c", null)];
     expect(planSession(list, "b")?.id).toBe("b");
-    expect(planSession(list, "c")?.id).toBe("a");
-    expect(planSession([sess("c", null)], "c")).toBeNull();
+    expect(planSession(list, "c")).toBeNull();
+    expect(planSession(list, null)).toBeNull();
   });
 
   it("an empty plan still counts: the dialog is open in the terminal", () => {
-    expect(planSession([sess("a", "")], null)?.id).toBe("a");
+    expect(planSession([sess("a", "")], "a")?.id).toBe("a");
   });
 
   it("real pending interactions always win", () => {

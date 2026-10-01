@@ -41,7 +41,7 @@ export function buildViews(actions: ViewActions): Map<IslandViewName, ViewHost> 
   return new Map<IslandViewName, ViewHost>([
     ["session", buildSessionView(actions)],
     ["interaction", buildInteraction(actions)],
-    ["plan", buildPlan()],
+    ["plan", buildPlan(actions)],
     ["finished", buildFinished(actions)],
     ["empty", simple("empty-view", "No Claude Code sessions yet", "Start claude in Warp or any terminal. Sessions appear here on their first event.")],
     ["confused", simple("confused-view", "Ouch.", "Give Mochi a second.")],

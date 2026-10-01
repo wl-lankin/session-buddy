@@ -101,6 +101,7 @@ export class Island {
       focus: (id) => {
         State.focusId = id;
         Sound.play("blip");
+        this.leavePlanIfGone();
         State.notify();
         this.animateGeometry(false);
       },
@@ -283,7 +284,13 @@ export class Island {
     State.focusId = id;
     Sound.play("blip");
     if (State.mode === "expanded" && State.view === "empty") this.setView("session");
+    this.leavePlanIfGone();
     State.notify();
+  }
+
+  /** The plan card belongs to the focused session: switching to one without a plan shows its session view. */
+  private leavePlanIfGone() {
+    if (State.mode === "expanded" && State.view === "plan" && !planSession(State.sessions, State.focusId)) this.setView("session");
   }
 
   // -- Data from Rust -------------------------------------------------------
@@ -311,6 +318,8 @@ export class Island {
     } else if (planned && queue.length === 0) {
       Sound.play("approval");
       State.focusId = planned;
+      // The same snapshot may have resolved a reply card: give the keyboard back.
+      this.setKeyboard(false);
       this.showPlan();
     } else if (queue.length === 0 && State.view === "interaction") {
       State.isPinned = false;

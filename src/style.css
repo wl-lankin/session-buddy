@@ -625,7 +625,12 @@ body {
   color: var(--ink-2);
   user-select: text;
 }
-.p-hint { flex: 0 0 auto; font: 500 11.5px var(--font); color: var(--amber); opacity: 0.9; padding: 0 2px 2px; }
+.p-head { cursor: pointer; }
+.p-head:hover .sname-project { text-decoration: underline; text-underline-offset: 3px; }
+.p-foot { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 2px 2px; min-width: 0; }
+.p-hint { flex: 1 1 auto; min-width: 0; font: 500 11.5px var(--font); color: var(--amber); opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-link { flex: 0 0 auto; border: 0; background: transparent; padding: 0; font: 500 11.5px var(--font); color: var(--dim-2); cursor: pointer; }
+.p-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .md-h { font-weight: 700; color: var(--ink); margin: 6px 0 3px; }
 .md-h:first-child { margin-top: 0; }
 .md-h1 { font-size: 14px; }

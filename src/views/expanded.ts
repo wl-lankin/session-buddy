@@ -198,7 +198,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       const s = State.focus;
       const now = Date.now();
       const minute = Math.floor(now / 60_000);
-      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}`).join("|")}#${s?.id ?? ""}`, () => tabs(actions, all, s?.id ?? null));
+      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}`).join("|")}#${s?.id ?? ""}`, () => tabs(actions, all, s?.id ?? null));
       keyed(accountEl, JSON.stringify([State.snapshot.usage, minute]), () => accountBlock(State.snapshot.usage, now));
       if (!s) {
         keyed(headEl, "none", () => [h("div", { class: "x-title" }, h("span", { class: "x-name", text: "No sessions" }))]);

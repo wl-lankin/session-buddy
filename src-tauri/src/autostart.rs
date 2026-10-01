@@ -17,11 +17,22 @@ pub fn launches_us(command: &str) -> bool {
     lower.contains("session-buddy") || lower.contains("session buddy")
 }
 
-pub fn refresh(app: &AppHandle, enabled: bool) {
-    if enabled {
-        if let Err(err) = app.autolaunch().enable() {
-            crate::log::line(format!("autostart: {err}"));
+/// The old entry goes when autostart is off, or once the new entry was written; if writing the
+/// new one failed, the old one is the only thing that still starts the app, so it stays.
+pub fn should_remove_legacy(autostart: bool, enabled_ok: bool) -> bool {
+    !autostart || enabled_ok
+}
+
+pub fn refresh(app: &AppHandle, autostart: bool) {
+    let mut enabled_ok = false;
+    if autostart {
+        match app.autolaunch().enable() {
+            Ok(()) => enabled_ok = true,
+            Err(err) => crate::log::line(format!("autostart: {err}")),
         }
+    }
+    if !should_remove_legacy(autostart, enabled_ok) {
+        return;
     }
     match remove_legacy() {
         Ok(true) => crate::log::line(format!("autostart: removed the old \"{LEGACY_NAME}\" entry")),
@@ -75,5 +86,12 @@ mod tests {
         assert!(launches_us(r#""C:\Program Files\Session Buddy\Session Buddy.exe""#));
         assert!(launches_us("<string>/Applications/Session Buddy.app/Contents/MacOS/session-buddy</string>"));
         assert!(!launches_us(r"C:\Program Files\Other\other.exe --minimized"));
+    }
+
+    #[test]
+    fn the_old_entry_stays_when_the_new_one_could_not_be_written() {
+        assert!(should_remove_legacy(false, false), "autostart off: always removed");
+        assert!(should_remove_legacy(true, true));
+        assert!(!should_remove_legacy(true, false));
     }
 }

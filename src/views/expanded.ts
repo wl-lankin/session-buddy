@@ -7,10 +7,11 @@
 import { h } from "./dom";
 import { colorForProject, VIEW_HEIGHT_SESSION } from "../core/layout";
 import { State } from "../core/state";
-import type { Extra, LimitRow, Session, Usage } from "../core/types";
+import type { Extra, LimitRow, Session, Step, StepDetail, Usage } from "../core/types";
 import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format";
 import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, oauthNote, recentClass, recentCount, rowLevel, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { accountWidth } from "../model/size";
+import { diffLines, stepKey } from "../model/stepdetail";
 import { bar, enlargeButton, keyed, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
@@ -163,7 +164,7 @@ function accountBlock(u: Usage, now: number): Node[] {
   return out;
 }
 
-function stepsCol(s: Session, rows: number): Node[] {
+function stepsCol(actions: ViewActions, s: Session, rows: number): Node[] {
   const head = h("div", { class: "x-h", text: "STEPS" });
   const recent = s.steps.slice(-rows);
   if (!recent.length) {
@@ -175,14 +176,64 @@ function stepsCol(s: Session, rows: number): Node[] {
     ...recent.map((st, i) => {
       const current = i === last && st.ok === null && s.status === "working";
       const icon = st.ok === false ? "\u00D7" : st.ok === true ? "\u2713" : current ? "\u203A" : "\u00B7";
+      const key = stepKey(s.id, st);
+      const open = State.stepOpen === key;
+      // Edits and commands unfold their change or output below the steps.
+      const toggle = st.detail
+        ? (e: Event) => {
+            e.stopPropagation();
+            State.stepOpen = open ? null : key;
+            actions.redraw();
+          }
+        : undefined;
       return h(
         "div",
-        { class: `x-row${st.ok === false ? " fail" : ""}` },
+        {
+          class: `x-row${st.ok === false ? " fail" : ""}${st.detail ? " has-detail" : ""}${open ? " open" : ""}`,
+          onclick: toggle,
+          title: st.detail ? (open ? "Fold" : `${st.label}\nClick for the change`) : st.label,
+        },
         h("span", { class: "x-icon", text: icon }),
-        h("span", { class: current ? "x-label shimmer" : "x-label", text: st.label, title: st.label }),
+        h("span", { class: current ? "x-label shimmer" : "x-label", text: st.label }),
+        st.detail ? h("span", { class: "x-chev", text: open ? "\u25B4" : "\u25BE" }) : null,
       );
     }),
   ];
+}
+
+const baseName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+
+/** The unfolded step: its file and change, or its command and the end of the output. */
+function stepPanel(actions: ViewActions, st: Step, detail: StepDetail): Node[] {
+  const close = h("button", {
+    class: "sd-close",
+    title: "Close",
+    text: "\u00D7",
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      State.stepOpen = null;
+      actions.redraw();
+    },
+  });
+  if (detail.kind === "run") {
+    const out: Node[] = [h("div", { class: "sd-cmd" }, h("span", { class: "sd-mark", text: "$" }), h("span", { class: "sd-cmd-text", text: detail.command }), close)];
+    const text = detail.output ?? (st.ok === null ? "running\u2026" : "no output");
+    out.push(h("div", { class: `sd-out${st.ok === false ? " fail" : ""}${detail.output ? "" : " none"}`, text }));
+    return out;
+  }
+  const out: Node[] = [h("div", { class: "sd-head", title: detail.path }, h("span", { text: baseName(detail.path) }), close)];
+  detail.hunks.forEach((hk, i) => {
+    if (i > 0) out.push(h("div", { class: "sd-gap", text: "\u22EF" }));
+    for (const line of diffLines(hk.old, hk.new)) {
+      if (line.kind === "gap") {
+        out.push(h("div", { class: "sd-gap", text: line.text }));
+        continue;
+      }
+      const cls = line.kind === "-" ? " del" : line.kind === "+" ? " add" : "";
+      out.push(h("div", { class: `sd-line${cls}` }, h("span", { class: "sd-mark", text: line.kind }), h("span", { text: line.text })));
+    }
+  });
+  return out;
 }
 
 /** Sessions whose finished agents are unfolded in the agents column. */
@@ -287,7 +338,18 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   });
   const answerFull = h("div", { class: "x-answer-full scrollable" });
   const stepsEl = h("div", { class: "x-col x-steps" });
+  const stepFull = h("div", { class: "x-step-full scrollable" });
   const sideEl = h("div", { class: "x-col x-side" });
+  const bodyEl = h("div", { class: "x-body" }, stepsEl, sideEl);
+  /** How far the longer column's rows reach: an unfolded step starts right below them. */
+  const bodyContentH = () => {
+    const top = bodyEl.getBoundingClientRect().top;
+    const bottom = (col: HTMLElement) => {
+      const last = col.lastElementChild;
+      return last ? last.getBoundingClientRect().bottom - top : 0;
+    };
+    return Math.max(bottom(stepsEl), bottom(sideEl));
+  };
   const accountEl = h("div", { class: "blk x-account" });
   const sessionEl = h(
     "div",
@@ -297,7 +359,8 @@ export function buildSessionView(actions: ViewActions): ViewHost {
     answerEl,
     answerFull,
     h("div", { class: "x-divider" }),
-    h("div", { class: "x-body" }, stepsEl, sideEl),
+    bodyEl,
+    stepFull,
   );
   const el = h(
     "div",
@@ -306,6 +369,8 @@ export function buildSessionView(actions: ViewActions): ViewHost {
     h("div", { class: "x-main" }, sessionEl, accountEl),
   );
   let acctW = accountWidth(0);
+  /** The steps/agents body's height at the natural size, measured while no step is unfolded. */
+  let bodyNaturalH = 0;
 
   /** The account column fits the email (and plan) on one line, up to its maximum. */
   const fitAccount = (u: Usage) => {
@@ -321,13 +386,20 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   return {
     el,
     measure() {
-      // The fixed rows, plus the unfolded last answer (its max-height caps it unless the island is enlarged).
-      if (answerFull.style.display === "none") return VIEW_HEIGHT_SESSION;
-      const cs = getComputedStyle(answerFull);
-      const margins = parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
-      const cap = parseFloat(cs.maxHeight);
-      const natural = answerFull.scrollHeight + 2;
-      return VIEW_HEIGHT_SESSION + margins + (Number.isFinite(cap) ? Math.min(natural, cap) : natural);
+      // The fixed rows, plus the unfolded last answer and step (their max-height caps them unless the island is enlarged).
+      const extra = (panel: HTMLElement) => {
+        if (panel.style.display === "none") return 0;
+        const cs = getComputedStyle(panel);
+        const margins = parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+        const cap = parseFloat(cs.maxHeight);
+        const natural = panel.scrollHeight + 2;
+        return margins + (Number.isFinite(cap) ? Math.min(natural, cap) : natural);
+      };
+      const step = extra(stepFull);
+      if (!step && State.manualH == null && bodyEl.clientHeight > 0) bodyNaturalH = bodyEl.clientHeight;
+      // The free space under the rows (few steps, few agents: a lot) goes to the panel first.
+      const slack = step && bodyNaturalH ? Math.max(0, bodyNaturalH - bodyContentH() - 4) : 0;
+      return VIEW_HEIGHT_SESSION + extra(answerFull) + Math.max(0, step - slack);
     },
     needs() {
       const island = el.closest<HTMLElement>("#island");
@@ -367,6 +439,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
         answerFull.style.display = "none";
         keyed(stepsEl, "none", () => []);
         keyed(sideEl, "none", () => []);
+        stepFull.style.display = "none";
         return;
       }
       keyed(headEl, JSON.stringify([s.id, s.status, s.project, s.branch, s.cwd, s.stats, s.model]), () => header(s));
@@ -391,7 +464,14 @@ export function buildSessionView(actions: ViewActions): ViewHost {
 
       // An enlarged island shows more steps instead of empty space.
       const rows = Math.max(STEP_ROWS, Math.floor((stepsEl.clientHeight - STEP_HEAD_H) / STEP_ROW_H));
-      keyed(stepsEl, JSON.stringify([s.id, s.status, rows, s.steps.slice(-rows)]), () => stepsCol(s, rows));
+      // The unfolded step belongs to this session and must still be in its list.
+      const openStep = s.steps.find((st) => st.detail && stepKey(s.id, st) === State.stepOpen);
+      if (State.stepOpen && !openStep && !State.stepOpen.startsWith(`${s.id}@`)) State.stepOpen = null;
+      keyed(stepsEl, JSON.stringify([s.id, s.status, rows, s.steps.slice(-rows), State.stepOpen]), () => stepsCol(actions, s, rows));
+      stepFull.style.display = openStep ? "" : "none";
+      keyed(stepFull, JSON.stringify(openStep ? [openStep.at, openStep.ok, openStep.detail] : null), () =>
+        openStep?.detail ? stepPanel(actions, openStep, openStep.detail) : [],
+      );
       keyed(sideEl, JSON.stringify([s.id, s.agents, s.background, minute, openFinished.has(s.id)]), () => sideCol(actions, s, now));
     },
   };

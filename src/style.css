@@ -546,6 +546,52 @@ body {
 .x-icon { width: 10px; flex: 0 0 10px; text-align: center; font: 700 10px var(--font); color: var(--dim-3); }
 .x-row.fail .x-icon, .x-row.fail .x-label { color: var(--red-text); }
 .x-row.run .x-icon { color: var(--green-2); animation: sb-breathe 1.6s ease-in-out infinite; }
+.x-row.has-detail { cursor: pointer; border-radius: 5px; }
+.x-row.has-detail .x-chev { margin-left: auto; padding-right: 4px; font-size: 9px; color: var(--dim-4); opacity: 0; }
+.x-row.has-detail:hover .x-chev, .x-row.open .x-chev { opacity: 1; }
+.x-row.has-detail:hover, .x-row.open { background: rgba(255, 255, 255, 0.04); }
+
+/* The unfolded step: an edit's lines or a command and the end of its output. */
+.x-step-full {
+  flex: 0 1 auto;
+  min-height: 34px;
+  max-height: 200px;
+  margin: 2px 0 1px;
+  padding: 5px 0;
+  border-radius: 8px;
+  background: var(--card-flat);
+  border: 1px solid var(--block-edge);
+  font: 400 11px/1.35 var(--mono);
+  color: var(--ink-2);
+  overflow: auto;
+  user-select: text;
+}
+.sd-head { display: flex; align-items: center; padding: 0 6px 4px 10px; margin-bottom: 3px; border-bottom: 1px solid var(--block-edge); font: 500 11px var(--font); color: var(--dim); }
+.sd-line, .sd-cmd { display: flex; padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sd-mark { flex: 0 0 16px; color: var(--dim-4); user-select: none; }
+.sd-line.del { background: rgba(244, 80, 94, 0.12); color: var(--red-text); }
+.sd-line.add { background: rgba(52, 211, 153, 0.10); color: #9ff0cf; }
+.sd-line.del .sd-mark { color: var(--red-text); }
+.sd-line.add .sd-mark { color: var(--green-2); }
+.sd-gap { padding: 2px 26px; color: var(--dim-4); }
+.sd-cmd { color: var(--ink); padding-right: 6px; }
+.sd-cmd-text { flex: 1 1 auto; min-width: 0; }
+.sd-close {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--dim-3);
+  font: 400 15px/18px var(--font);
+  cursor: pointer;
+}
+.sd-close:hover { background: rgba(255, 255, 255, 0.08); color: var(--ink); }
+.sd-out { padding: 4px 10px 0 26px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+.sd-out.fail { color: var(--red-text); }
+.sd-out.none { font-family: var(--font); color: var(--dim-4); }
 .x-label { font: 500 12px var(--font); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .x-atype { font: 600 11px var(--font); color: var(--dim-2); flex: 0 0 auto; }
 .x-fold { width: 100%; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; font: inherit; }
@@ -719,7 +765,7 @@ body {
 .i-message { flex: 1 1 auto; min-height: 0; overflow-y: auto; font: 400 12.5px/1.45 var(--font); color: var(--ink-2); white-space: pre-wrap; padding-right: 4px; user-select: text; }
 .i-foot { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .i-head, .i-notice { flex: 0 0 auto; }
-.i-reply { flex: 0 0 auto; overflow: hidden; resize: none; display: block; }
+.i-reply { flex: 0 0 auto; margin-top: 8px; overflow: hidden; resize: none; display: block; }
 .i-reply.overflowing { overflow-y: auto; }
 .i-countdown { font: 500 11px var(--font); color: var(--dim-4); }
 .i-notice { font: 500 11.5px var(--font); color: var(--red-text); }
@@ -758,6 +804,11 @@ body {
 .md-code, .md-code-inline { font-family: var(--mono); font-size: 11.5px; color: #e8e9ec; background: rgba(255, 255, 255, 0.06); border-radius: 6px; }
 .md-code-inline { padding: 0 4px; }
 .md-code { margin: 4px 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Claude's message on the reply card: rendered Markdown, a little air between paragraphs. */
+.i-message { white-space: normal; }
+.i-message .md-p { margin: 0 0 5px; }
+.i-message .md-li + .md-p, .i-message .md-code + .md-p { margin-top: 5px; }
+.i-message strong { color: var(--ink); font-weight: 600; }
 
 /* ── Manual size: grip, enlarge button, enlarged layouts ────────────── */
 #grip {
@@ -805,4 +856,5 @@ body {
 .big .i-target { max-height: none; }
 .big .f-message, .big .f-list { max-height: none; flex: 1 1 auto; }
 .big .x-answer-full { max-height: none; }
+.big .x-step-full { max-height: none; }
 .big .x-body { flex: 1 1 160px; min-height: 120px; }

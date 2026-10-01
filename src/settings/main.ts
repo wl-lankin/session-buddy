@@ -11,7 +11,7 @@ import { buddyMark } from "./mark";
 
 // ?demo=1 in a plain browser: a fake boot result for the README screenshots.
 const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "1";
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS }, version: "1.0.1" };
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS }, version: "1.0.2" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,

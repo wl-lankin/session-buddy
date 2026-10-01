@@ -11,6 +11,7 @@ import { answersFor, pendingQueue } from "../model/viewmodel";
 import { createSubmitGuard } from "../model/submitguard";
 import { btn, enlargeButton, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
+import { renderMarkdown } from "./markdown";
 
 const KIND_LABEL: Record<Interaction["kind"], string> = {
   approval: "Permission",
@@ -163,7 +164,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
         send();
       }
     });
-    body.replaceChildren(h("div", { class: "i-message scrollable", text: item.message }), box);
+    // Claude writes Markdown: **bold**, `code`, lists and code blocks read better rendered.
+    body.replaceChildren(h("div", { class: "i-message scrollable" }, ...renderMarkdown(item.message)), box);
     foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), btn("Send", "primary", send));
   }
 
@@ -221,7 +223,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     },
     measure() {
       // Natural height of the card: scrollable areas count with their full content, the rest as laid out.
-      const natural = (c: HTMLElement) => (c.classList.contains("i-reply") ? c.offsetHeight : c.scrollHeight + c.offsetHeight - c.clientHeight);
+      const natural = (c: HTMLElement) =>
+        c.classList.contains("i-reply") ? c.offsetHeight + parseFloat(getComputedStyle(c).marginTop) : c.scrollHeight + c.offsetHeight - c.clientHeight;
       const bodyKids = [...body.children] as HTMLElement[];
       const bodyH = bodyKids.reduce((sum, c) => sum + natural(c), 0) + Math.max(0, bodyKids.length - 1) * 6;
       const rows = [head.offsetHeight, bodyH, notice.style.display === "none" ? 0 : notice.offsetHeight, foot.offsetHeight].filter((x) => x > 0);

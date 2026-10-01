@@ -62,6 +62,8 @@ class AppState {
   manualH: number | null = null;
   /** The session whose last answer is unfolded in the session view. */
   answerOpenFor: string | null = null;
+  /** The step whose change or output is unfolded (stepKey), or null. */
+  stepOpen: string | null = null;
   settings: Settings = { ...DEFAULT_SETTINGS };
 
   private listeners = new Set<Listener>();

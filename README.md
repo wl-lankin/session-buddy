@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.1](https://img.shields.io/badge/version-1.0.1-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.2](https://img.shields.io/badge/version-1.0.2-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
@@ -14,6 +14,7 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 - **Every session at a glance**: project, branch, status, lines changed, context use, model and the current step.
 - **Sub-agents and background tasks** of each session, live.
+- **What a step did**: click an Edit or Write step for its diff, a command for its full text and the end of its output.
 - **Answer from the island**: Allow / Deny permission requests, pick `AskUserQuestion` options, reply to a turn that ends in a question.
 - **Plans** from plan mode, shown read-only while Claude Code waits in its own terminal dialog.
 - **Finished sessions** show a short card with how long the turn took and how Claude's last message starts.
@@ -39,8 +40,8 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/session-buddy/releases/latest)**:
 
-- **Windows**: `Session Buddy_1.0.1_x64-setup.exe`. Installs for the current user, no admin needed.
-- **macOS**: `Session Buddy_1.0.1_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
+- **Windows**: `Session Buddy_1.0.2_x64-setup.exe`. Installs for the current user, no admin needed.
+- **macOS**: `Session Buddy_1.0.2_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
 The builds are not code-signed yet, so the first start needs one extra click:
 
@@ -58,7 +59,7 @@ npm install
 npm run pack
 ```
 
-- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.1_x64-setup.exe`.
+- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.2_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
 On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
@@ -100,6 +101,7 @@ Claude Code runs a tiny relay, `sb-relay`, for every hook event and as the statu
 - No telemetry, no analytics, no accounts.
 - The only network call is the usage endpoint (`GET https://api.anthropic.com/api/oauth/usage`), with Claude Code's own login token.
 - That token is read fresh each time and never stored or logged.
+- Diffs and the end of command output (at most 1500 characters per stream) only go from the relay to the app and are kept in memory, never written to disk.
 - Everything else stays on your machine.
 
 ## Troubleshooting

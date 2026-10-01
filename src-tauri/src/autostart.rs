@@ -78,6 +78,7 @@ fn remove_legacy() -> Result<bool, String> {
 /// The plugin leaves the LaunchAgent's AssociatedBundleIdentifiers empty, so Login Items in
 /// System Settings shows the bare binary ("session-buddy", exec icon) instead of the app.
 /// `None` when the plist already names a bundle or has no empty list to fill.
+#[cfg(any(target_os = "macos", test))]
 pub fn with_bundle_id(plist: &str, identifier: &str) -> Option<String> {
     const KEY: &str = "<key>AssociatedBundleIdentifiers</key>";
     const EMPTY: &str = "<array></array>";

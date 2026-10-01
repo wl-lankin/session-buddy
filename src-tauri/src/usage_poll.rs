@@ -42,7 +42,8 @@ fn read_token() -> Option<String> {
 }
 
 async fn fetch(client: &reqwest::Client) -> Result<Value, String> {
-    let token = read_token().ok_or_else(|| "Not logged in to Claude Code".to_string())?;
+    // File reads and (on macOS) the Keychain prompt block: keep them off the async workers.
+    let token = tokio::task::spawn_blocking(read_token).await.ok().flatten().ok_or_else(|| "Not logged in to Claude Code".to_string())?;
     let resp = client
         .get(ENDPOINT)
         .bearer_auth(token)
@@ -72,7 +73,7 @@ pub fn spawn(app: AppHandle) {
             let now = now_ms();
             let shared = app.state::<Shared>();
             let rate_limits = shared.hub.store.lock().unwrap().rate_limits.clone();
-            let account = read_account();
+            let account = tokio::task::spawn_blocking(read_account).await.ok().flatten();
             match usage::decide(rate_limits.as_ref(), last_fetch, now) {
                 Plan::UseStatusline(v, at) => usage::apply_statusline(&mut shared.usage.lock().unwrap(), &v, at),
                 Plan::Fetch => {

@@ -51,13 +51,16 @@ fn hook(arg_event: &str) {
 }
 
 /// Copies stdin to stdout first (the user's own status line reads it from the
-/// pipe), then forwards the JSON to the app.
+/// pipe), closes stdout so that status line sees EOF at once, then forwards
+/// the JSON to the app.
 fn statusline(quiet: bool) {
     let raw = read_stdin();
     if !quiet {
-        let mut stdout = std::io::stdout();
+        let mut stdout = std::io::stdout().lock();
         let _ = stdout.write_all(&raw);
         let _ = stdout.flush();
+        drop(stdout);
+        close_stdout();
     }
     let bytes = raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&raw);
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return };
@@ -66,6 +69,26 @@ fn statusline(quiet: bool) {
     let mut line = value.to_string();
     line.push('\n');
     let _ = send_within(line, false, STATUSLINE_BUDGET);
+}
+
+/// Closes the process's stdout handle. Nothing is written to stdout afterwards
+/// and the buffer is already flushed.
+#[cfg(windows)]
+fn close_stdout() {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    let handle = std::io::stdout().as_raw_handle();
+    if handle.is_null() || handle as isize == -1 {
+        return;
+    }
+    // SAFETY: the standard output handle is owned by this process and never used again.
+    drop(unsafe { OwnedHandle::from_raw_handle(handle) });
+}
+
+#[cfg(unix)]
+fn close_stdout() {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    // SAFETY: fd 1 is owned by this process and never used again.
+    drop(unsafe { OwnedFd::from_raw_fd(1) });
 }
 
 fn main() {

@@ -22,7 +22,7 @@ pub struct CursorPayload {
     y: f64,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct IslandRect {
     pub x: f64,
     pub y: f64,
@@ -134,6 +134,7 @@ pub fn set_activating(win: &WebviewWindow, on: bool) {
 pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<Gate>) {
     std::thread::spawn(move || {
         let mut last = (f64::MIN, f64::MIN);
+        let mut last_rect = IslandRect::default();
         let mut last_screen = None;
         let mut ticks: u32 = 0;
         loop {
@@ -155,11 +156,14 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<Gate>) {
             let Ok(c) = app.cursor_position() else { continue };
             let x = (c.x - origin.x as f64) / scale;
             let y = (c.y - origin.y as f64) / scale;
-            if (x - last.0).abs() < 1.0 && (y - last.1).abs() < 1.0 {
+            // The island can grow under a resting cursor: re-check when either moves.
+            let r = *gate.rect.lock().unwrap();
+            let moved = (x - last.0).abs() >= 1.0 || (y - last.1).abs() >= 1.0;
+            if !moved && r == last_rect {
                 continue;
             }
             last = (x, y);
-            let r = *gate.rect.lock().unwrap();
+            last_rect = r;
             let on_island = r.w > 0.0
                 && x >= r.x - HIT_MARGIN
                 && x <= r.x + r.w + HIT_MARGIN
@@ -169,7 +173,9 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<Gate>) {
                 gate.ignoring.store(!on_island, Ordering::Relaxed);
                 let _ = win.set_ignore_cursor_events(!on_island);
             }
-            let _ = win.emit("cursor", CursorPayload { x, y });
+            if moved {
+                let _ = win.emit("cursor", CursorPayload { x, y });
+            }
         }
     });
 }

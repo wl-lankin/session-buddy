@@ -97,12 +97,10 @@ pub fn install(existing: &Value, relay: &str) -> Installed {
         other => other.as_ref(),
     };
     if !current.as_ref().map(command_is_ours).unwrap_or(false) {
-        let mut sl = Map::new();
+        // Keep every setting of the user's status line (padding, refreshInterval, ...); only the command changes.
+        let mut sl = original.and_then(Value::as_object).cloned().unwrap_or_default();
         sl.insert("type".into(), json!("command"));
         sl.insert("command".into(), json!(status_line_command(relay, original)));
-        if let Some(padding) = original.and_then(|o| o.get("padding")) {
-            sl.insert("padding".into(), padding.clone());
-        }
         root.insert("statusLine".into(), Value::Object(sl));
     }
     Installed { settings: Value::Object(root), saved_status_line }
@@ -306,7 +304,7 @@ mod tests {
                 "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "my-guard.sh"}]}],
                 "Stop": [{"hooks": [{"type": "command", "command": "\"C:/x/coucou-hook.exe\" Stop"}]}]
             },
-            "statusLine": {"type": "command", "command": "python ~/.claude/statusline.py", "padding": 0},
+            "statusLine": {"type": "command", "command": "python ~/.claude/statusline.py", "padding": 0, "refreshInterval": 5},
             "permissions": {"allow": ["Bash(ls:*)"]}
         })
     }
@@ -333,6 +331,7 @@ mod tests {
         let out = install(&user_settings(), RELAY);
         assert_eq!(out.settings["statusLine"]["command"], format!("\"{RELAY}\" statusline | python ~/.claude/statusline.py"));
         assert_eq!(out.settings["statusLine"]["padding"], 0);
+        assert_eq!(out.settings["statusLine"]["refreshInterval"], 5, "every key of the original is kept");
         assert_eq!(out.saved_status_line, Some(user_settings()["statusLine"].clone()));
         assert!(status_line_installed(&out.settings));
     }

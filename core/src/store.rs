@@ -485,7 +485,9 @@ impl Store {
                 s.set_status(Status::Idle, now);
                 changed = true;
             }
-            if s.pending.is_empty() && s.status != Status::Stale && now - s.last_event_at >= stale {
+            // A long tool or a running agent sends no events while it works: not stale.
+            let busy = s.steps.back().is_some_and(|x| x.ok.is_none()) || s.agents.iter().any(|a| a.running);
+            if s.pending.is_empty() && !busy && s.status != Status::Stale && now - s.last_event_at >= stale {
                 s.set_status(Status::Stale, now);
                 changed = true;
             }
@@ -673,6 +675,21 @@ mod tests {
         st.apply_hook(&ev("PermissionRequest", json!({"tool_name": "Bash", "sb_request_id": "r1", "sb_wait_ms": 1})), T0);
         st.tick(T0 + DEFAULT_STALE_AFTER_MS * 2);
         assert_eq!(sess(&st).status, Status::NeedsYou);
+    }
+
+    #[test]
+    fn running_tool_or_agent_never_goes_stale() {
+        let mut st = Store::default();
+        st.apply_hook(&ev("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "cargo build"}})), T0);
+        st.tick(T0 + DEFAULT_STALE_AFTER_MS * 2);
+        assert_eq!(sess(&st).status, Status::Working, "the Bash call is still running");
+        st.apply_hook(&ev("PostToolUse", json!({"tool_name": "Bash"})), T0 + 1);
+        st.apply_hook(&ev("SubagentStart", json!({"agent_id": "a1", "agent_type": "Explore"})), T0 + 2);
+        st.tick(T0 + 2 + DEFAULT_STALE_AFTER_MS * 2);
+        assert_ne!(sess(&st).status, Status::Stale, "an agent is still running");
+        st.apply_hook(&ev("SubagentStop", json!({"agent_id": "a1"})), T0 + 3);
+        st.tick(T0 + 3 + DEFAULT_STALE_AFTER_MS);
+        assert_eq!(sess(&st).status, Status::Stale);
     }
 
     #[test]

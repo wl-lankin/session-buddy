@@ -255,10 +255,23 @@ fn adopt_running(app: &AppHandle) {
         return;
     }
     let procs = adopt::claude_processes(&process::list_processes());
-    if shared.hub.store.lock().unwrap().adopt(&procs, cfg!(windows), now_ms()) {
-        mark_dirty();
+    let held = {
+        let mut st = shared.hub.store.lock().unwrap();
+        if st.adopt(&procs, cfg!(windows), now_ms()) {
+            mark_dirty();
+        }
+        st.count_held(&procs)
+    };
+    let result = (procs.len(), held);
+    let mut last = LAST_SCAN.lock().unwrap();
+    if *last != Some(result) {
+        *last = Some(result);
+        log::line(format!("process scan: {} claude processes, {} adopted", result.0, result.1));
     }
 }
+
+/// The last process scan's (claude processes, held by a session): logged only when it changes.
+static LAST_SCAN: Mutex<Option<(usize, usize)>> = Mutex::new(None);
 
 fn spawn_loops(app: AppHandle) {
     let emitter = app.clone();

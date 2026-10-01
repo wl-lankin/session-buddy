@@ -7,6 +7,11 @@ const MAX_HOPS: usize = 16;
 /// True for "claude", "claude.exe", "node", "Node.EXE" and the like.
 fn is_claude_exe(exe: &str) -> bool {
     let name = exe.rsplit(['/', '\\']).next().unwrap_or(exe);
+    // A self-update renames the running binary to claude.exe.old.<time>.<pid>; the process keeps that image.
+    let name = match name.to_ascii_lowercase().find(".old.") {
+        Some(i) if i > 0 => &name[..i],
+        _ => name,
+    };
     let stem = match name.rsplit_once('.') {
         Some((stem, _)) if !stem.is_empty() => stem,
         _ => name,
@@ -232,6 +237,13 @@ mod tests {
     fn similar_names_do_not_match() {
         let t = tree(&[(30, 20, "claude-helper.exe"), (20, 10, "nodemon"), (10, 0, "explorer.exe")]);
         assert_eq!(find_claude_ancestor(30, |p| t.get(&p).cloned()), None);
+    }
+
+    #[test]
+    fn finds_a_self_updated_claude_running_under_its_renamed_image() {
+        let t = tree(&[(30, 20, "bash.exe"), (20, 10, r"C:\Users\a\.local\bin\claude.exe.old.1790878074763.57844"), (10, 1, "warp.exe")]);
+        assert_eq!(find_claude_ancestor(30, |p| t.get(&p).cloned()), Some(20));
+        assert!(!is_claude_exe("claude-helper.exe.old.1.2"));
     }
 
     #[test]

@@ -29,12 +29,19 @@ pub struct Candidate {
     pub id: String,
     pub first_cwd: Option<String>,
     pub cwd: String,
+    /// The transcript folder name under ~/.claude/projects: the directory Claude Code started in, encoded.
+    pub project_key: Option<String>,
     /// When its transcript was last written.
     pub modified_ms: i64,
 }
 
 fn stem(exe: &str) -> &str {
     let name = exe.rsplit(['/', '\\']).next().unwrap_or(exe);
+    // A self-update renames the running binary to claude.exe.old.<time>.<pid>; the process keeps that image.
+    let name = match name.to_ascii_lowercase().find(".old.") {
+        Some(i) if i > 0 => &name[..i],
+        _ => name,
+    };
     match name.rsplit_once('.') {
         Some((stem, _)) if !stem.is_empty() => stem,
         _ => name,
@@ -67,29 +74,60 @@ pub fn claude_processes(all: &[RawProcess]) -> Vec<ClaudeProcess> {
         .collect()
 }
 
-/// Same directory, ignoring trailing separators; on Windows also case and slash direction.
-pub fn same_dir(a: &str, b: &str, windows: bool) -> bool {
-    let norm = |p: &str| {
-        let p = if windows { p.replace('/', "\\") } else { p.to_string() };
-        let sep = if windows { '\\' } else { '/' };
-        let trimmed = p.trim_end_matches(sep);
-        let p = if trimmed.is_empty() || trimmed.ends_with(':') { p } else { trimmed.to_string() };
-        if windows { p.to_lowercase() } else { p }
+/// A directory for comparison: no `\\?\` prefix, no trailing separator (a root keeps one);
+/// on Windows also backslashes only and lower case.
+pub fn normalize_dir(p: &str, windows: bool) -> String {
+    let p = if windows {
+        let p = p.replace('/', "\\");
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else {
+            p.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(p)
+        }
+    } else {
+        p.to_string()
     };
-    !a.is_empty() && !b.is_empty() && norm(a) == norm(b)
+    let sep = if windows { '\\' } else { '/' };
+    let trimmed = p.trim_end_matches(sep);
+    let p = if trimmed.is_empty() || trimmed.ends_with(':') { format!("{trimmed}{sep}") } else { trimmed.to_string() };
+    if windows { p.to_lowercase() } else { p }
+}
+
+/// Same directory, ignoring trailing separators and `\\?\` prefixes; on Windows also case and slash direction.
+pub fn same_dir(a: &str, b: &str, windows: bool) -> bool {
+    !a.is_empty() && !b.is_empty() && normalize_dir(a, windows) == normalize_dir(b, windows)
+}
+
+/// The folder name Claude Code files a session's transcripts under: the start directory with
+/// every character other than an ASCII letter or digit replaced by `-`.
+pub fn project_key(dir: &str) -> String {
+    let dir = dir.strip_prefix(r"\\?\").unwrap_or(dir);
+    let trimmed = dir.trim_end_matches(['/', '\\']);
+    let dir = if trimmed.is_empty() { dir } else { trimmed };
+    dir.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+fn same_key(a: &str, b: &str, windows: bool) -> bool {
+    !a.is_empty() && if windows { a.eq_ignore_ascii_case(b) } else { a == b }
 }
 
 /// (session id, pid) pairs. A process takes the seeded session whose first cwd
-/// or cwd is its working directory; when several match, the one with the newest
+/// or cwd is its working directory, or whose transcript folder is named after it
+/// (the directory Claude Code started in); when several match, the one with the newest
 /// transcript. Each session and each process is used at most once.
 pub fn match_processes(candidates: &[Candidate], procs: &[ClaudeProcess], windows: bool) -> Vec<(String, u32)> {
     let mut taken: Vec<&str> = Vec::new();
     let mut out = Vec::new();
     for p in procs {
+        let key = project_key(&p.cwd);
         let best = candidates
             .iter()
             .filter(|c| !taken.contains(&c.id.as_str()))
-            .filter(|c| c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows)) || same_dir(&c.cwd, &p.cwd, windows))
+            .filter(|c| {
+                c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows))
+                    || same_dir(&c.cwd, &p.cwd, windows)
+                    || c.project_key.as_deref().is_some_and(|k| same_key(k, &key, windows))
+            })
             .max_by(|a, b| a.modified_ms.cmp(&b.modified_ms).then_with(|| b.id.cmp(&a.id)));
         if let Some(c) = best {
             taken.push(&c.id);
@@ -108,7 +146,7 @@ mod tests {
     }
 
     fn cand(id: &str, first: Option<&str>, cwd: &str, modified_ms: i64) -> Candidate {
-        Candidate { id: id.into(), first_cwd: first.map(Into::into), cwd: cwd.into(), modified_ms }
+        Candidate { id: id.into(), first_cwd: first.map(Into::into), cwd: cwd.into(), project_key: None, modified_ms }
     }
 
     fn proc_(pid: u32, cwd: &str) -> ClaudeProcess {
@@ -173,6 +211,48 @@ mod tests {
         assert_eq!(match_processes(&c, &[proc_(1, "/p/x")], false), vec![("new".to_string(), 1)]);
         // Two processes in the same directory take the two newest sessions.
         assert_eq!(match_processes(&c, &[proc_(1, "/p/x"), proc_(2, "/p/x")], false), vec![("new".to_string(), 1), ("mid".to_string(), 2)]);
+    }
+
+    #[test]
+    fn a_self_updated_claude_code_keeps_running_under_its_renamed_image() {
+        // The native installer renames the running binary on update; the process keeps that image path.
+        assert!(is_claude_process(r"C:\Users\a\.local\bin\claude.exe.old.1790878074763.57844", None));
+        assert!(is_claude_process("/Users/a/.local/bin/claude.old.1790878074763", None));
+        assert!(!is_claude_process(r"C:\x\claude-helper.exe.old.1.2", None));
+    }
+
+    #[test]
+    fn normalises_separators_case_and_verbatim_prefixes() {
+        assert_eq!(normalize_dir(r"C:\Projects\", true), r"c:\projects");
+        assert_eq!(normalize_dir(r"\\?\C:\Projects\", true), r"c:\projects");
+        assert_eq!(normalize_dir("C:/Projects//", true), r"c:\projects");
+        assert_eq!(normalize_dir(r"\\?\UNC\srv\share\x", true), r"\\srv\share\x");
+        assert_eq!(normalize_dir(r"C:\", true), r"c:\");
+        assert_eq!(normalize_dir("/p/X/", false), "/p/X");
+        assert!(same_dir(r"\\?\C:\Projects\", "C:/projects", true));
+    }
+
+    #[test]
+    fn project_key_is_the_transcript_folder_name() {
+        assert_eq!(project_key(r"C:\Projects\"), "C--Projects");
+        assert_eq!(project_key(r"\\?\C:\Projects"), "C--Projects");
+        assert_eq!(project_key(r"C:\Projects\InvoiceRails\development\api.invoicerails"), "C--Projects-InvoiceRails-development-api-invoicerails");
+        assert_eq!(project_key("/Users/a/p/x/"), "-Users-a-p-x");
+    }
+
+    #[test]
+    fn sessions_that_moved_on_still_match_the_directory_claude_code_started_in() {
+        // Real shape: Claude Code processes started in C:\Projects (the PEB path keeps the trailing
+        // backslash), their transcripts in projects/C--Projects, the transcript cwds in sub folders.
+        let key = |id: &str, cwd: &str, key: &str, modified_ms| Candidate { id: id.into(), first_cwd: Some(cwd.into()), cwd: cwd.into(), project_key: Some(key.into()), modified_ms };
+        let c = [
+            key("a", r"C:\Projects\pushdocs\api", "C--Projects", 2),
+            key("b", r"C:\Projects", "C--Projects", 1),
+            key("c", r"C:\Elsewhere", "C--Elsewhere", 3),
+        ];
+        let procs = [proc_(10, r"C:\Projects\"), proc_(20, r"C:\Projects\")];
+        assert_eq!(match_processes(&c, &procs, true), vec![("a".to_string(), 10), ("b".to_string(), 20)]);
+        assert!(match_processes(&c[..1], &[proc_(10, r"C:\Projects\pushdocs")], false).is_empty(), "the key matches the start directory only");
     }
 
     #[test]

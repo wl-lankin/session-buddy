@@ -20,6 +20,8 @@ pub struct Seed {
     pub cwd: String,
     /// The first cwd in the tail: it names the project.
     pub first_cwd: String,
+    /// The transcript's folder under projects/: the directory Claude Code started in, encoded.
+    pub project_key: String,
     pub last_prompt: Option<String>,
     pub last_message: Option<String>,
     pub model: Option<String>,
@@ -117,6 +119,7 @@ pub fn scan(projects_dir: &Path, now: i64, max_age_ms: i64) -> Vec<Seed> {
     let mut seeds = Vec::new();
     let Ok(projects) = std::fs::read_dir(projects_dir) else { return seeds };
     for project in projects.flatten() {
+        let project_key = project.file_name().to_string_lossy().into_owned();
         let Ok(files) = std::fs::read_dir(project.path()) else { continue };
         for file in files.flatten() {
             let path = file.path();
@@ -130,7 +133,7 @@ pub fn scan(projects_dir: &Path, now: i64, max_age_ms: i64) -> Vec<Seed> {
             let Some(text) = read_tail(&path) else { continue };
             let Tail { id, cwd, first_cwd, prompt: last_prompt, message: last_message, model } = parse_tail(&text);
             let session_id = id.unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
-            seeds.push(Seed { session_id, cwd: cwd.unwrap_or_default(), first_cwd: first_cwd.unwrap_or_default(), last_prompt, last_message, model, modified_ms: mtime });
+            seeds.push(Seed { session_id, cwd: cwd.unwrap_or_default(), first_cwd: first_cwd.unwrap_or_default(), project_key: project_key.clone(), last_prompt, last_message, model, modified_ms: mtime });
         }
     }
     seeds.sort_by_key(|s| s.modified_ms);
@@ -143,6 +146,7 @@ pub fn session_from_seed(seed: &Seed, now: i64, stale_after_ms: i64) -> Session 
     let first = if seed.first_cwd.is_empty() { &seed.cwd } else { &seed.first_cwd };
     s.project = project_name(first);
     s.first_cwd = (!first.is_empty()).then(|| first.clone());
+    s.project_key = (!seed.project_key.is_empty()).then(|| seed.project_key.clone());
     s.last_prompt = seed.last_prompt.clone();
     s.last_message = seed.last_message.clone();
     s.model = seed.model.clone();
@@ -203,6 +207,7 @@ mod tests {
         let seeds = scan(dir.path(), now, 2 * 60 * 60_000);
         assert_eq!(seeds.len(), 1, "sub-agent transcripts and other files are skipped");
         assert_eq!(seeds[0].session_id, "s1");
+        assert_eq!(seeds[0].project_key, "C--Projects-pushdocs", "the folder names the start directory");
         assert_eq!(seeds[0].last_prompt.as_deref(), Some("fix the DATEV 409 handling"));
         // Three hours later the same file is too old.
         assert!(scan(dir.path(), now + 3 * 60 * 60_000, 2 * 60 * 60_000).is_empty());
@@ -215,7 +220,7 @@ mod tests {
 
     #[test]
     fn seed_becomes_idle_or_stale() {
-        let seed = Seed { session_id: "s1".into(), cwd: "/p/bankconnect/sub".into(), first_cwd: "/p/bankconnect".into(), last_prompt: Some("p".into()), last_message: None, model: Some("claude-opus-5-5".into()), modified_ms: 1_000 };
+        let seed = Seed { session_id: "s1".into(), cwd: "/p/bankconnect/sub".into(), first_cwd: "/p/bankconnect".into(), project_key: "-p-bankconnect".into(), last_prompt: Some("p".into()), last_message: None, model: Some("claude-opus-5-5".into()), modified_ms: 1_000 };
         let fresh = session_from_seed(&seed, 1_000 + 60_000, 10 * 60_000);
         assert_eq!(fresh.status, Status::Idle);
         assert_eq!(fresh.project, "bankconnect");

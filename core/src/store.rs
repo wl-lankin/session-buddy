@@ -127,6 +127,9 @@ pub struct Session {
     pub first_cwd: Option<String>,
     #[serde(skip)]
     pub toplevel_checked: bool,
+    /// For a seed: its transcript folder name, the encoded directory Claude Code started in.
+    #[serde(skip)]
+    pub project_key: Option<String>,
     /// When the current turn started (prompt, or the first work event when the prompt was not seen).
     #[serde(skip)]
     pub turn_started_at: Option<i64>,
@@ -224,6 +227,7 @@ impl Session {
             branch_checked_at: i64::MIN / 2,
             first_cwd: None,
             toplevel_checked: false,
+            project_key: None,
             turn_started_at: None,
             work_started_at: None,
             finish_deferred: false,
@@ -702,7 +706,7 @@ impl Store {
             .sessions
             .values()
             .filter(|s| !s.live && s.pid.is_none())
-            .map(|s| Candidate { id: s.id.clone(), first_cwd: s.first_cwd.clone(), cwd: s.cwd.clone(), modified_ms: s.last_event_at })
+            .map(|s| Candidate { id: s.id.clone(), first_cwd: s.first_cwd.clone(), cwd: s.cwd.clone(), project_key: s.project_key.clone(), modified_ms: s.last_event_at })
             .collect();
         candidates.sort_by(|a, b| a.id.cmp(&b.id));
         let pairs = match_processes(&candidates, &free, windows);
@@ -717,6 +721,11 @@ impl Store {
             }
         }
         !pairs.is_empty()
+    }
+
+    /// How many of `procs` some session holds.
+    pub fn count_held(&self, procs: &[ClaudeProcess]) -> usize {
+        procs.iter().filter(|p| self.sessions.values().any(|s| s.pid == Some(p.pid))).count()
     }
 
     /// Adds a session found on disk at start-up; never overwrites a live one.
@@ -1444,6 +1453,32 @@ mod tests {
         assert_eq!(got.last_event_at, later);
         assert!(!st.tick(later + 1), "the stale timer starts again from the adoption");
         assert_eq!(st.get("s1").unwrap().status, Status::Idle);
+    }
+
+    #[test]
+    fn seeds_that_cd_elsewhere_are_adopted_by_their_start_directory() {
+        // The real shape: every Claude Code started in C:\Projects (PEB cwd with a trailing
+        // backslash), transcripts under projects/C--Projects, the latest cwds in sub folders.
+        let mut st = Store::default();
+        for (id, cwd, age) in [("a", r"C:\Projects\pushdocs\development\api.pushdocs", 760_000), ("b", r"C:\Projects", 761_000), ("c", r"C:\Projects\session-buddy", 39_000)] {
+            let seed = crate::bootstrap::Seed {
+                session_id: id.into(),
+                cwd: cwd.into(),
+                first_cwd: cwd.into(),
+                project_key: "C--Projects".into(),
+                last_prompt: None,
+                last_message: None,
+                model: None,
+                modified_ms: T0 - age,
+            };
+            st.seed(crate::bootstrap::session_from_seed(&seed, T0, 600_000));
+        }
+        let procs = [ClaudeProcess { pid: 1, cwd: r"C:\Projects\".into() }, ClaudeProcess { pid: 2, cwd: r"C:\Projects\".into() }, ClaudeProcess { pid: 3, cwd: r"C:\Projects\".into() }];
+        assert_eq!(st.count_held(&procs), 0);
+        assert!(st.adopt(&procs, true, T0));
+        assert!(st.snapshot().iter().all(|s| s.live), "all three are live");
+        assert_eq!(st.count_held(&procs), 3);
+        assert!(st.snapshot().iter().all(|s| s.status == Status::Idle), "stale seeds with a running process are idle");
     }
 
     #[test]

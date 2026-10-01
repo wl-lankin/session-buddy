@@ -42,7 +42,6 @@ function onMac(): boolean {
   return typeof navigator !== "undefined" && /mac/i.test(navigator.platform ?? "");
 }
 
-/** True for the browser's own shortcuts. */
 export function isBrowserShortcut(e: KeyLike, ctx: ShortcutContext = {}): boolean {
   if (e.code === "F5" || e.code === "BrowserBack" || e.code === "BrowserForward" || e.code === "BrowserRefresh") return true;
   const mac = ctx.mac ?? onMac();
@@ -85,7 +84,6 @@ export function installNoBrowser(target: Pick<Document, "addEventListener"> = do
     },
     { capture: true },
   );
-  // Ctrl + wheel zooms the page.
   target.addEventListener(
     "wheel",
     (e) => {

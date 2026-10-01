@@ -4,8 +4,6 @@
 import { Sound } from "../core/sound";
 import { COMPACT_W, NOTCH_H, NOTCH_W } from "../core/layout";
 
-// ── Timing (mirrors greeting-v2.html `T`) ─────────────────────────────────────
-
 const T = {
   grow: 0.45,
   squint0: 0.6,
@@ -31,8 +29,6 @@ const T = {
 
 export const GREETING_END = T.end;
 
-// ── Geometry (640×150) ────────────────────────────────────────────────────────
-
 const C0 = { x: 320, y: 90 };
 const HB = 58;
 const ASP = 1.34;
@@ -43,8 +39,6 @@ const CARD = { x: 10, y: 36, w: 620, h: 104 };
 const CARD_R = 20;
 const SMALL_W = COMPACT_W;
 const SMALL_H = NOTCH_H;
-
-// ── Easing ────────────────────────────────────────────────────────────────────
 
 const E = {
   out: (t: number) => 1 - Math.pow(1 - t, 3),
@@ -60,8 +54,6 @@ const E = {
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const seg = (t: number, a: number, b: number) => clamp((t - a) / (b - a), 0, 1);
-
-// ── Pose ──────────────────────────────────────────────────────────────────────
 
 type EyeType = "dot" | "happy" | "content";
 
@@ -203,8 +195,6 @@ function pose(t: number, tc: number): Pose {
   return p;
 }
 
-// ── Particles (seeded LCG, seed = 7, identical sequence to the Swift version) ──
-
 interface RingDot { a: number; j: number; s: number; al: number }
 interface Ring { t0: number; dots: RingDot[] }
 interface Streak { a: number; sp: number; len: number; t0: number; col: string }
@@ -234,8 +224,6 @@ const PARTICLES = (() => {
   }));
   return { rings, streaks };
 })();
-
-// ── Drawing ───────────────────────────────────────────────────────────────────
 
 function rr(x: CanvasRenderingContext2D, X: number, Y: number, W: number, H: number, R: number) {
   const r = Math.max(0, Math.min(R, W / 2, H / 2));
@@ -371,7 +359,6 @@ function drawMochi(x: CanvasRenderingContext2D, p: Pose) {
     x.restore();
   }
 
-  // Eyes
   x.save();
   x.clip(body);
   x.fillStyle = "#16171A";
@@ -405,7 +392,6 @@ function drawMochi(x: CanvasRenderingContext2D, p: Pose) {
   }
   x.restore();
 
-  // Activity badge
   if (p.badge > 0.01) {
     const br = hh * 0.3;
     x.save();
@@ -477,8 +463,6 @@ function drawMinis(x: CanvasRenderingContext2D, alpha: number) {
     x.restore();
   });
 }
-
-// ── Controller ────────────────────────────────────────────────────────────────
 
 /**
  * Runs the greeting animation on its own canvas. `onComplete` fires once at

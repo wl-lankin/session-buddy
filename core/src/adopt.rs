@@ -3,12 +3,10 @@
 //! Code processes to those transcripts by working directory makes them live.
 //! Pure: the app lists the processes, this decides who is who.
 
-/// One process as the app found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawProcess {
     pub pid: u32,
     pub parent_pid: u32,
-    /// The executable's file name or path.
     pub exe: String,
     /// None when the command line could not be read.
     pub command_line: Option<String>,
@@ -16,7 +14,6 @@ pub struct RawProcess {
     pub cwd: Option<String>,
 }
 
-/// A running Claude Code process and the directory it runs in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeProcess {
     pub pid: u32,
@@ -93,7 +90,6 @@ pub fn normalize_dir(p: &str, windows: bool) -> String {
     if windows { p.to_lowercase() } else { p }
 }
 
-/// Same directory, ignoring trailing separators and `\\?\` prefixes; on Windows also case and slash direction.
 pub fn same_dir(a: &str, b: &str, windows: bool) -> bool {
     !a.is_empty() && !b.is_empty() && normalize_dir(a, windows) == normalize_dir(b, windows)
 }
@@ -137,7 +133,6 @@ pub fn match_processes(candidates: &[Candidate], procs: &[ClaudeProcess], window
         Some(k) => same_key(k, key, windows),
         None => c.first_cwd.as_deref().is_some_and(|f| same_dir(f, &p.cwd, windows)),
     };
-    // Lowest pid first in both passes, so the result does not depend on the order of `procs`.
     let mut procs: Vec<&ClaudeProcess> = procs.iter().collect();
     procs.sort_by_key(|p| p.pid);
     let mut taken: Vec<&str> = Vec::new();

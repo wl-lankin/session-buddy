@@ -38,8 +38,6 @@ pub fn find_claude_ancestor(start_pid: u32, lookup: impl Fn(u32) -> Option<(u32,
     None
 }
 
-/// The pid of the Claude Code process above this relay, if there is one.
-///
 /// Windows: one cheap lookup per hop (open, ask the kernel for the parent pid
 /// and the image name, close) instead of a snapshot of every process. The
 /// Toolhelp snapshot is only used when the kernel query does not work at all.
@@ -114,7 +112,6 @@ fn toolhelp_claude_pid() -> Option<u32> {
     find_claude_ancestor(parent, |pid| table.get(&pid).cloned())
 }
 
-/// pid -> (parent pid, executable name) for every process.
 #[cfg(windows)]
 fn toolhelp_table() -> Option<std::collections::HashMap<u32, (u32, String)>> {
     use std::collections::HashMap;

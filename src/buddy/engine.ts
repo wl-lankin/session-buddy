@@ -8,8 +8,6 @@ import { Ease, lerp, type EaseFn } from "../core/anim";
 import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 export type EyeShape =
   | "pill" | "wide" | "dot" | "line" | "flat" | "happy" | "closed"
   | "spiral" | "heart" | "star" | "tired" | "wink" | "cup";
@@ -58,8 +56,6 @@ interface Particle {
   age: number; life: number; rot: number; size: number;
 }
 
-// ── Constants (MochiConst / PISTES.mochi) ─────────────────────────────────────
-
 const EYE_W = 0.25;
 const EYE_H = 0.27;
 const EYE_SP = 0.37;
@@ -102,7 +98,6 @@ export const BOT_STATES: Record<BotStateName, BotStateCfg> = {
   dizzy: { ...base, color: C.dizzy, tint: 0.7, eye: "spiral", badge: null },
 };
 
-/** State → sound, as in BotStateCfg.sound. */
 export const STATE_SOUND: Partial<Record<BotStateName, string>> = {
   working: "work", thinking: "think", searching: "search", approval: "approval",
   question: "question", error: "error", finished: "finish", ratelimit: "rate",
@@ -113,8 +108,6 @@ const EMOTE_EYE: Record<BotEmoteName, EyeShape> = {
   love: "heart", surprised: "dot", proud: "star", wink: "wink",
   yawn: "tired", happy: "happy", annoyed: "line",
 };
-
-// ── Small helpers ─────────────────────────────────────────────────────────────
 
 const now = () => performance.now() / 1000;
 
@@ -162,19 +155,15 @@ function starPath(x: CanvasRenderingContext2D, ro: number, ri: number) {
 
 const FONT = `system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif`;
 
-// ── Engine ────────────────────────────────────────────────────────────────────
-
 export class BotEngine {
   isMini = false;
-  /** Solid body colour for mini bots / integration pills (null = Mochi gradient). */
+  /** Solid body colour (null = Mochi gradient). */
   bodyColor: RGB | null = null;
 
-  // Animated state (BotEngine `s`)
   yaw = 0; pitch = 0; roll = 0; tilt = 0; open = 1;
   sx = 1; sy = 1; oy = 0; ox = 0;
   tint = 0; morph = 0; hands = 0; blush = 0; es = 1; badgeS = 0;
 
-  // Targets
   tgYaw = 0; tgPitch = 0; tgTilt = 0; tgSy = 1; tgSx = 1; tgEs = 1;
 
   /** Extra canvas height above the body so hearts can fly out without clipping. */
@@ -219,8 +208,6 @@ export class BotEngine {
 
   /** Fired when three slaps land inside 1.7 s (→ dizzy + confused view). */
   onDizzy: (() => void) | null = null;
-
-  // ── Public API ──────────────────────────────────────────────────────────────
 
   setState(next: BotStateName, force = false) {
     if (this.state === next && !force) return;
@@ -472,16 +459,12 @@ export class BotEngine {
     );
   }
 
-  // ── Tweens ──────────────────────────────────────────────────────────────────
-
   anim(prop: PropKey, keys: TweenKey[], onComplete?: () => void) {
     this.tweens.set(prop, {
       prop, keys, index: 0, from: this[prop], startMs: performance.now(), onComplete,
     });
     this.locks.add(prop);
   }
-
-  // ── Update ──────────────────────────────────────────────────────────────────
 
   update(dt: number) {
     const n = now();
@@ -633,8 +616,6 @@ export class BotEngine {
         this.miniNextBehavior = n + 3.0 + Math.random() * 2.0;
     }
   }
-
-  // ── Draw ────────────────────────────────────────────────────────────────────
 
   /**
    * Draws hands, body, blush, eyes, mouth, badge and particles into a canvas of

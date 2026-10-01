@@ -169,11 +169,7 @@ export function orderSessions(sessions: Session[]): Session[] {
   return [...sessions].sort((a, b) => Number(b.live) - Number(a.live) || a.startedAt - b.startedAt);
 }
 
-/**
- * What the tab row, strip dots, compact pager, cycling and number keys show: the live sessions,
- * plus the recent ones (seeded from transcripts) when the "Recent" pill is on. `sessions` comes
- * ordered live first, so the recent ones stay at the end.
- */
+/** The live sessions, plus the recent ones (seeded from transcripts) when the "Recent" pill is on. `sessions` is ordered live first. */
 export function visibleSessions(sessions: Session[], showRecent: boolean): Session[] {
   return showRecent ? sessions : sessions.filter((s) => s.live);
 }
@@ -186,7 +182,6 @@ export const recentClass = (s: Session): string => (s.live ? "" : " recent");
 /** More sessions than this and inactive tabs get tighter padding; their names shrink to fit the row. */
 export const TAB_COMPACT_ABOVE = 5;
 
-/** The agents column: running agents newest first, finished ones newest first. */
 export function agentGroups(agents: Agent[]): { running: Agent[]; finished: Agent[] } {
   const newest = (a: Agent, b: Agent) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt) || b.startedAt - a.startedAt;
   return {
@@ -195,7 +190,6 @@ export function agentGroups(agents: Agent[]): { running: Agent[]; finished: Agen
   };
 }
 
-/** How many finished agents the unfolded summary lists. */
 export const FINISHED_AGENT_ROWS = 5;
 
 /** A finished agent's row: its description, else its type ("agent" only when nothing better is known). */
@@ -220,7 +214,6 @@ export function answersFor(questions: Question[], picks: Record<string, string[]
   return out;
 }
 
-/** A limit row's colour: the worse of its percentage and the severity the endpoint reported. */
 export function rowLevel(pct: number, severity: string | null | undefined): Level {
   const bySeverity: Level = severity === "critical" ? "crit" : severity === "warning" ? "warn" : "ok";
   const byPct = level(pct);
@@ -230,7 +223,6 @@ export function rowLevel(pct: number, severity: string | null | undefined): Leve
 /** The endpoint data (scoped limits, extra usage) counts as old after this long without an answer. */
 export const OAUTH_STALE_MS = 20 * 60_000;
 
-/** A dim note under the scoped and extra rows when the endpoint failed or has not answered for a while. */
 export function oauthNote(u: Usage, now: number): { text: string; title: string | null } | null {
   if (!u.extra && !u.limits.some((r) => r.kind === "weekly_scoped")) return null;
   const old = u.oauthUpdatedAt != null && now - u.oauthUpdatedAt > OAUTH_STALE_MS;

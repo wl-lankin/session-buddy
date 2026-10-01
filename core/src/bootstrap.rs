@@ -43,7 +43,6 @@ fn text_of(content: &Value) -> Option<String> {
     }
 }
 
-/// What the tail of a transcript says about its session.
 #[derive(Debug, Default, PartialEq)]
 pub struct Tail {
     pub id: Option<String>,

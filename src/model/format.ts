@@ -16,7 +16,9 @@ export function fmtTokens(n: number | null | undefined): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-export const fmtLines = (added: number, removed: number): string => `+${added} -${removed}`;
+export const fmtAdded = (n: number): string => `+${n}`;
+export const fmtRemoved = (n: number): string => `-${n}`;
+export const fmtLines = (added: number, removed: number): string => `${fmtAdded(added)} ${fmtRemoved(removed)}`;
 
 export function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));

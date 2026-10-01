@@ -3,9 +3,9 @@
 import { h, svg } from "./dom";
 import { ICONS } from "./icons";
 import { State } from "../core/state";
-import { fmtLines, fmtPct, level } from "../model/format";
+import { fmtPct, level } from "../model/format";
 import { currentActivity, sessionTitle, statusLine } from "../model/viewmodel";
-import { statusDot } from "./parts";
+import { linesChanged, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 export function buildCompact(actions: ViewActions): ViewHost {
@@ -32,7 +32,7 @@ export function buildCompact(actions: ViewActions): ViewHost {
       const all = State.sessions;
       if (!s) {
         title.textContent = "No sessions yet";
-        lines.textContent = "";
+        lines.replaceChildren();
         ctx.textContent = "";
         pager.style.display = "none";
         status.replaceChildren(document.createTextNode("Start claude in any terminal"));
@@ -40,7 +40,7 @@ export function buildCompact(actions: ViewActions): ViewHost {
         return;
       }
       title.textContent = sessionTitle(s);
-      lines.textContent = s.stats.linesAdded || s.stats.linesRemoved ? fmtLines(s.stats.linesAdded, s.stats.linesRemoved) : "";
+      lines.replaceChildren(...(s.stats.linesAdded || s.stats.linesRemoved ? linesChanged(s.stats.linesAdded, s.stats.linesRemoved) : []));
       const pct = s.stats.contextUsedPct;
       ctx.textContent = pct == null ? "" : `ctx ${fmtPct(pct)}%`;
       ctx.className = `c-ctx ${level(pct)}`;

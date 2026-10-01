@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstLine, fmtAgo, fmtCountdown, fmtDuration, fmtLines, fmtReset, fmtTokens, level, parseReset } from "./format";
+import { firstLine, fmtAgo, fmtCountdown, fmtAdded, fmtDuration, fmtLines, fmtRemoved, fmtReset, fmtTokens, level, parseReset } from "./format";
 
 describe("format", () => {
   it("levels at 70 and 90", () => {
@@ -18,6 +18,9 @@ describe("format", () => {
 
   it("lines use a plain hyphen", () => {
     expect(fmtLines(128, 34)).toBe("+128 -34");
+    expect(fmtAdded(128)).toBe("+128");
+    expect(fmtRemoved(34)).toBe("-34");
+    expect(fmtRemoved(0)).toBe("-0");
   });
 
   it("durations and ages", () => {

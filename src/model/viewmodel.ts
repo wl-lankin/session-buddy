@@ -135,10 +135,38 @@ export function limitsShort(u: Usage): { text: string; level: Level } {
   return { text: parts.join(" · "), level: parts.length ? level(worst) : "ok" };
 }
 
+/** Visible text of the account label: email and plan only, the org lives in the tooltip. */
 export function accountLabel(u: Usage): string {
   const a = u.account;
   if (!a) return "";
+  return [a.email, a.plan].filter(Boolean).join(" · ");
+}
+
+export function accountTitle(u: Usage): string {
+  const a = u.account;
+  if (!a) return "";
   return [a.email, a.org, a.plan].filter(Boolean).join(" · ");
+}
+
+/** "claude-opus-5-5" -> "Opus 5.5". Display names from the status line pass through untouched. */
+export function modelName(raw: string | null): string {
+  if (!raw) return "";
+  const m = /^claude-([a-z]+)-(\d+(?:-\d{1,2})?)(?:-\d{8})?$/.exec(raw);
+  if (!m) return raw;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2].replace("-", ".")}`;
+}
+
+/** Live sessions (not idle/stale, or active since the app started) first, each group by start time. */
+export function orderSessions(sessions: Session[], appStart: number): Session[] {
+  const live = (s: Session) => (s.status !== "idle" && s.status !== "stale") || s.lastEventAt > appStart;
+  return [...sessions].sort((a, b) => Number(live(b)) - Number(live(a)) || a.startedAt - b.startedAt);
+}
+
+/** More sessions than this and inactive tabs shrink to glyph plus three characters. */
+export const TAB_COMPACT_ABOVE = 5;
+
+export function tabLabel(project: string, active: boolean, total: number): string {
+  return active || total <= TAB_COMPACT_ABOVE ? project : Array.from(project).slice(0, 3).join("");
 }
 
 /** AskUserQuestion `answers`: one string per question, multi-select joined with ", ". Null while incomplete. */

@@ -2,7 +2,7 @@
 
 import type { BotStateName, IslandMode, IslandViewName } from "./layout";
 import { EMPTY_SNAPSHOT, type Session, type Snapshot } from "./types";
-import { botStateFor, loudest } from "../model/viewmodel";
+import { botStateFor, loudest, orderSessions } from "../model/viewmodel";
 
 export interface Settings {
   soundEnabled: boolean;
@@ -32,6 +32,8 @@ export const DEFAULT_SETTINGS: Settings = {
 
 type Listener = () => void;
 
+const APP_START = Date.now();
+
 class AppState {
   mode: IslandMode = "strip";
   view: IslandViewName = "session";
@@ -49,6 +51,8 @@ class AppState {
   settings: Settings = { ...DEFAULT_SETTINGS };
 
   private listeners = new Set<Listener>();
+  private orderedFrom: Snapshot | null = null;
+  private ordered: Session[] = [];
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -59,8 +63,13 @@ class AppState {
     for (const fn of this.listeners) fn();
   }
 
+  /** Live sessions first, then idle/stale ones; tabs, dots, pager and cycling all use this order. */
   get sessions(): Session[] {
-    return this.snapshot.sessions;
+    if (this.orderedFrom !== this.snapshot) {
+      this.orderedFrom = this.snapshot;
+      this.ordered = orderSessions(this.snapshot.sessions, APP_START);
+    }
+    return this.ordered;
   }
 
   get focus(): Session | null {

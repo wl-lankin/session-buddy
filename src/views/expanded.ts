@@ -7,9 +7,9 @@ import { h } from "./dom";
 import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
 import type { Limit, Session, Usage } from "../core/types";
-import { firstLine, fmtAgo, fmtLines, fmtPct, fmtReset, fmtTokens } from "../model/format";
-import { accountLabel, sessionTitle, statusGlyph } from "../model/viewmodel";
-import { bar, keyed, statusDot } from "./parts";
+import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format";
+import { accountLabel, accountTitle, modelName, sessionTitle, statusGlyph, tabLabel, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import { bar, keyed, linesChanged, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 const STEP_ROWS = 7;
@@ -23,15 +23,15 @@ function tabs(actions: ViewActions, sessions: Session[], focusId: string | null)
     h(
       "button",
       {
-        class: `tab ${s.status}${s.id === focusId ? " on" : ""}`,
-        title: `${i + 1}  ${s.cwd}`,
+        class: `tab ${s.status}${s.id === focusId ? " on" : ""}${sessions.length > TAB_COMPACT_ABOVE ? " many" : ""}`,
+        title: `${i + 1}  ${s.project}  ${s.cwd}`,
         onclick: (e: Event) => {
           e.stopPropagation();
           actions.focus(s.id);
         },
       },
       h("span", { class: `sglyph ${s.status}`, style: `--c:${colorForProject(s.project)}`, text: statusGlyph(s.status) }),
-      h("span", { class: "tab-name", text: s.project }),
+      h("span", { class: "tab-name", text: tabLabel(s.project, s.id === focusId, sessions.length) }),
     ),
   );
 }
@@ -39,7 +39,7 @@ function tabs(actions: ViewActions, sessions: Session[], focusId: string | null)
 function header(s: Session): Node[] {
   const meta: Node[] = [];
   if (s.stats.linesAdded || s.stats.linesRemoved) {
-    meta.push(h("span", { class: "x-lines", text: fmtLines(s.stats.linesAdded, s.stats.linesRemoved) }));
+    meta.push(h("span", { class: "x-lines" }, ...linesChanged(s.stats.linesAdded, s.stats.linesRemoved)));
   }
   const pct = s.stats.contextUsedPct;
   if (pct != null) {
@@ -53,7 +53,7 @@ function header(s: Session): Node[] {
       ),
     );
   }
-  if (s.model) meta.push(h("span", { class: "x-model", text: s.model }));
+  if (s.model) meta.push(h("span", { class: "x-model", text: modelName(s.model) }));
   return [
     h("div", { class: "x-title" }, statusDot(s), h("span", { class: "x-name", text: sessionTitle(s) }), h("span", { class: "x-cwd", text: s.cwd })),
     h("div", { class: "x-meta" }, ...meta),
@@ -67,7 +67,7 @@ function limit(name: string, l: Limit | null, now: number): Node | null {
     "span",
     { class: "x-limit" },
     h("span", { class: "lbl", text: `${name} ` }),
-    bar(l.usedPct, 80),
+    bar(l.usedPct, 56),
     h("span", { text: ` ${fmtPct(l.usedPct)}%` }),
     reset ? h("span", { class: "x-reset", text: ` (${reset})` }) : null,
   );
@@ -78,7 +78,7 @@ function limitsRow(u: Usage, now: number): Node[] {
     return [h("span", { class: "x-reset", text: u.error ? `Limits unavailable: ${u.error}` : "Limits n/a" })];
   }
   const stale = u.error && u.updatedAt ? h("span", { class: "x-reset", text: ` updated ${fmtAgo(now - u.updatedAt)}` }) : null;
-  return present([limit("5H", u.fiveHour, now), limit("7D", u.sevenDay, now), h("span", { class: "x-account", text: accountLabel(u) }), stale]);
+  return present([limit("5H", u.fiveHour, now), limit("7D", u.sevenDay, now), h("span", { class: "x-account", text: accountLabel(u), title: accountTitle(u) }), stale]);
 }
 
 function stepsCol(s: Session): Node[] {

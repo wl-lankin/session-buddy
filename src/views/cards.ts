@@ -150,6 +150,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       if (text) answer(item.requestId, { reply: text });
     };
     box.addEventListener("mousedown", () => focusField(box));
+    box.addEventListener("input", () => box.classList.toggle("overflowing", box.scrollHeight > box.clientHeight + 1));
     box.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -204,7 +205,14 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       if (countdown.textContent !== text) countdown.textContent = text;
     },
     measure() {
-      return el.scrollHeight + 22;
+      // Natural height of the card: scrollable areas count with their full content, the rest as laid out.
+      const natural = (c: HTMLElement) => (c.classList.contains("i-reply") ? c.offsetHeight : c.scrollHeight + c.offsetHeight - c.clientHeight);
+      const bodyKids = [...body.children] as HTMLElement[];
+      const bodyH = bodyKids.reduce((sum, c) => sum + natural(c), 0) + Math.max(0, bodyKids.length - 1) * 6;
+      const rows = [head.offsetHeight, bodyH, notice.style.display === "none" ? 0 : notice.offsetHeight, foot.offsetHeight].filter((x) => x > 0);
+      const cs = getComputedStyle(el);
+      const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      return rows.reduce((a, b) => a + b, 0) + Math.max(0, rows.length - 1) * 8 + pad + 22;
     },
     key(e) {
       if (!current || current.item.kind !== "question") return false;

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Interaction, Session, Usage } from "../core/types";
 import {
-  accountLabel, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, pendingQueue,
-  resolveFocus, sessionTitle, statusLine, stripLabel, summarize,
+  accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue,
+  resolveFocus, sessionTitle, statusLine, stripLabel, summarize, tabLabel,
 } from "./viewmodel";
 
 let n = 0;
@@ -115,8 +115,49 @@ describe("viewmodel", () => {
     const u: Usage = { fiveHour: { usedPct: 42, resetsAt: null }, sevenDay: { usedPct: 91, resetsAt: null }, source: "oauth", updatedAt: 1, error: null, account: { email: "w@x.de", org: "finodata", plan: "Team" } };
     expect(limitsShort(u)).toEqual({ text: "5H 42% · 7D 91%", level: "crit" });
     expect(limitsShort({ ...u, fiveHour: null, sevenDay: null })).toEqual({ text: "", level: "ok" });
-    expect(accountLabel(u)).toBe("w@x.de · finodata · Team");
+    expect(accountLabel(u)).toBe("w@x.de · Team");
+    expect(accountTitle(u)).toBe("w@x.de · finodata · Team");
     expect(accountLabel({ ...u, account: null })).toBe("");
+    expect(accountTitle({ ...u, account: null })).toBe("");
+  });
+
+  it("orders live sessions first by start, then idle and stale ones", () => {
+    const APP = 1_000;
+    const idleOld = mk({ status: "idle", startedAt: 1, lastEventAt: 500 });
+    const working = mk({ status: "working", startedAt: 5, lastEventAt: 2_000 });
+    const stale = mk({ status: "stale", startedAt: 2, lastEventAt: 100 });
+    const idleActive = mk({ status: "idle", startedAt: 3, lastEventAt: 1_500 });
+    const waiting = mk({ status: "needs_you", startedAt: 4, lastEventAt: 10 });
+    const ids = (xs: Session[]) => xs.map((x) => x.id);
+    expect(ids(orderSessions([idleOld, working, stale, idleActive, waiting], APP))).toEqual(
+      ids([idleActive, waiting, working, idleOld, stale]),
+    );
+    expect(ids(orderSessions([], APP))).toEqual([]);
+  });
+
+  it("cycling follows the same order as the tabs", () => {
+    const a = mk({ status: "idle", startedAt: 1, lastEventAt: 1 });
+    const b = mk({ status: "working", startedAt: 2, lastEventAt: 5_000 });
+    const ordered = orderSessions([a, b], 1_000);
+    expect(cycle(ordered, ordered[0].id, 1)).toBe(a.id);
+    expect(cycle(ordered, ordered[0].id, -1)).toBe(a.id);
+    expect(ordered[0].id).toBe(b.id);
+  });
+
+  it("tab labels shrink for inactive tabs above five sessions", () => {
+    expect(tabLabel("pushdocs", false, 5)).toBe("pushdocs");
+    expect(tabLabel("pushdocs", false, 6)).toBe("pus");
+    expect(tabLabel("pushdocs", true, 9)).toBe("pushdocs");
+    expect(tabLabel("ab", false, 9)).toBe("ab");
+  });
+
+  it("maps raw model ids to display names", () => {
+    expect(modelName("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(modelName("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+    expect(modelName("claude-opus-4-20250514")).toBe("Opus 4");
+    expect(modelName("Opus 5.5")).toBe("Opus 5.5");
+    expect(modelName("claude-weird")).toBe("claude-weird");
+    expect(modelName(null)).toBe("");
   });
 
   it("builds AskUserQuestion answers as strings", () => {

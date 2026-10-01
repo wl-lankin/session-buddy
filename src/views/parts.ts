@@ -3,7 +3,7 @@
 import { h, clear } from "./dom";
 import { colorForProject } from "../core/layout";
 import type { Session } from "../core/types";
-import { level } from "../model/format";
+import { fmtAdded, fmtRemoved, level } from "../model/format";
 import { statusGlyph } from "../model/viewmodel";
 
 export function bar(pct: number | null, width = 64): HTMLElement {
@@ -25,4 +25,9 @@ export function keyed(container: HTMLElement, key: string, build: () => Node[]) 
   container.dataset.key = key;
   clear(container);
   container.append(...build());
+}
+
+/** "+N" in green and "-N" in red as two spans. */
+export function linesChanged(added: number, removed: number): Node[] {
+  return [h("span", { class: "ln-add", text: fmtAdded(added) }), document.createTextNode(" "), h("span", { class: "ln-del", text: fmtRemoved(removed) })];
 }

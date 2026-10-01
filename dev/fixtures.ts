@@ -14,25 +14,25 @@ const ACCOUNT = { email: "wolfgang.linz@example-company.de", org: "Example Compa
 
 /** The limits block: fresh values, values kept after a failed refresh, and no values at all. */
 export function demoUsage(now: number, kind: "ok" | "stale" | "error"): Usage {
-  const fiveHour = { usedPct: 42, resetsAt: now + 3 * 3600_000 };
-  const sevenDay = { usedPct: 74, resetsAt: now + 4 * 24 * 3600_000 };
+  const fiveHour = { usedPct: 42, resetsAt: now + 3 * 3600_000, severity: "normal" };
+  const sevenDay = { usedPct: 74, resetsAt: now + 4 * 24 * 3600_000, severity: "warning" };
   const limits = {
     fiveHour,
     sevenDay,
     limits: [
-      { kind: "session", label: "5H", ...fiveHour, severity: "normal" },
-      { kind: "weekly_all", label: "7D", ...sevenDay, severity: "warning" },
+      { kind: "session", label: "5H", ...fiveHour },
+      { kind: "weekly_all", label: "7D", ...sevenDay },
       { kind: "weekly_scoped", label: "7D Fable", usedPct: 12, resetsAt: sevenDay.resetsAt, severity: "normal" },
     ],
     extra: { enabled: true, usedMinor: 1240, limitMinor: 5000, currency: "EUR", exponent: 2, disabledReason: null, percent: 24.8 },
   };
   switch (kind) {
     case "ok":
-      return { ...limits, source: "statusline", updatedAt: now, error: null, account: ACCOUNT };
+      return { ...limits, source: "statusline", updatedAt: now, error: null, oauthUpdatedAt: now, oauthError: null, account: ACCOUNT };
     case "stale":
-      return { ...limits, source: "oauth", updatedAt: now - 14 * 60_000, error: "HTTP 429 from the usage endpoint", account: ACCOUNT };
+      return { ...limits, source: "oauth", updatedAt: now - 14 * 60_000, error: "HTTP 429 from the usage endpoint", oauthUpdatedAt: now - 14 * 60_000, oauthError: "HTTP 429 from the usage endpoint", account: ACCOUNT };
     case "error":
-      return { fiveHour: null, sevenDay: null, limits: [], extra: null, source: "none", updatedAt: null, error: "No OAuth token found in the credentials file", account: null };
+      return { fiveHour: null, sevenDay: null, limits: [], extra: null, source: "none", updatedAt: null, error: "No OAuth token found in the credentials file", oauthUpdatedAt: null, oauthError: null, account: null };
   }
 }
 

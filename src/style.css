@@ -547,16 +547,18 @@ body {
 /* Account block: same width for every session. */
 .x-account { display: flex; flex-direction: column; padding: 9px 10px 10px; overflow: hidden; }
 .x-account .x-h { margin: 0 0 4px; }
-.a-limit { display: flex; align-items: center; gap: 6px; height: 18px; font: 500 11px var(--mono); color: var(--dim); }
-.a-name { width: 16px; flex: 0 0 16px; font: 700 10px var(--font); color: var(--dim-3); }
+/* One grid for every limit row: label column, bar, percentage; the reset lines indent to the bar. */
+.a-limit { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; column-gap: 6px; height: 18px; font: 500 11px var(--mono); color: var(--dim); }
+.a-limit .bar { display: block; width: 100%; }
+.a-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 10px var(--font); color: var(--dim-3); }
+.a-limit.scoped { height: 16px; font-size: 10.5px; }
+.a-limit.scoped .a-name { font-size: 9.5px; }
+.a-reset { padding-left: 64px; height: 15px; line-height: 15px; margin-bottom: 6px; font: 400 10.5px var(--font); color: var(--dim-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-reset.scoped { height: 13px; line-height: 13px; margin-bottom: 4px; font-size: 10px; }
+.a-stale { margin-top: 3px; font: 400 10px var(--font); color: var(--dim-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-pct { margin-left: auto; font-variant-numeric: tabular-nums; }
 .a-pct.warn { color: var(--amber); }
 .a-pct.crit { color: var(--red-text); }
-.a-reset { padding-left: 22px; height: 15px; line-height: 15px; margin-bottom: 6px; font: 400 10.5px var(--font); color: var(--dim-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.a-limit.scoped { height: 16px; font-size: 10.5px; }
-.a-limit.scoped .a-name { width: auto; flex: 0 1 auto; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
-.a-limit.scoped .bar { flex: 0 0 auto; }
-.a-reset.scoped { padding-left: 0; height: 13px; line-height: 13px; margin-bottom: 4px; font-size: 10px; }
 .a-extra { margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--block-edge); display: flex; flex-direction: column; gap: 3px; }
 .a-extra-head { display: flex; align-items: center; justify-content: space-between; height: 14px; font: 500 11px var(--mono); color: var(--dim); }
 .a-extra-name { font: 700 10px var(--font); color: var(--dim-3); }

@@ -27,8 +27,8 @@ const base = (id: string, project: string, p: Partial<Session>): Session => ({
 });
 
 const USAGE: Usage = {
-  fiveHour: { usedPct: 38, resetsAt: NOW + 2 * 3600_000 + 14 * MIN },
-  sevenDay: { usedPct: 61, resetsAt: NOW + 3 * 24 * 3600_000 },
+  fiveHour: { usedPct: 38, resetsAt: NOW + 2 * 3600_000 + 14 * MIN, severity: "normal" },
+  sevenDay: { usedPct: 61, resetsAt: NOW + 3 * 24 * 3600_000, severity: "normal" },
   limits: [
     { kind: "session", label: "5H", usedPct: 38, resetsAt: NOW + 2 * 3600_000 + 14 * MIN, severity: "normal" },
     { kind: "weekly_all", label: "7D", usedPct: 61, resetsAt: NOW + 3 * 24 * 3600_000, severity: "normal" },
@@ -38,6 +38,8 @@ const USAGE: Usage = {
   source: "statusline",
   updatedAt: NOW,
   error: null,
+  oauthUpdatedAt: NOW,
+  oauthError: null,
   account: { email: "alex.morgan@example.com", org: null, plan: "Max" },
 };
 

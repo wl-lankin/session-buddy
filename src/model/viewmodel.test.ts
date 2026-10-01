@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Agent, Extra, Interaction, Session, Usage } from "../core/types";
 import {
   accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue, recentClass,
-  agentGroups, emailParts, extraView, rowLevel, finishedAgentLabel, recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, visibleSessions,
+  agentGroups, emailParts, extraView, oauthNote, rowLevel, finishedAgentLabel, recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, visibleSessions,
 } from "./viewmodel";
 
 let n = 0;
@@ -124,7 +124,7 @@ describe("viewmodel", () => {
   });
 
   it("limits and account", () => {
-    const u: Usage = { fiveHour: { usedPct: 42, resetsAt: null }, sevenDay: { usedPct: 91, resetsAt: null }, limits: [], extra: null, source: "oauth", updatedAt: 1, error: null, account: { email: "w@x.de", org: "finodata", plan: "Team" } };
+    const u: Usage = { fiveHour: { usedPct: 42, resetsAt: null, severity: "normal" }, sevenDay: { usedPct: 91, resetsAt: null, severity: "normal" }, limits: [], extra: null, source: "oauth", updatedAt: 1, error: null, oauthUpdatedAt: 1, oauthError: null, account: { email: "w@x.de", org: "finodata", plan: "Team" } };
     expect(limitsShort(u)).toEqual({ text: "5H 42% · 7D 91%", level: "crit" });
     expect(limitsShort({ ...u, fiveHour: null, sevenDay: null })).toEqual({ text: "", level: "ok" });
     expect(accountLabel(u)).toBe("w@x.de · Team");
@@ -232,6 +232,19 @@ describe("viewmodel", () => {
     expect(rowLevel(10, "warning")).toBe("warn");
     expect(rowLevel(10, "critical")).toBe("crit");
     expect(rowLevel(95, "warning")).toBe("crit");
+  });
+
+  it("notes stale or failed endpoint data under the scoped and extra rows", () => {
+    const now = 100 * 60_000;
+    const extra: Extra = { enabled: true, usedMinor: 1, limitMinor: null, currency: "EUR", exponent: 2, disabledReason: null, percent: null };
+    const base: Usage = { fiveHour: null, sevenDay: null, limits: [], extra, source: "statusline", updatedAt: now, error: null, oauthUpdatedAt: now - 60_000, oauthError: null, account: null };
+    expect(oauthNote(base, now), "fresh").toBeNull();
+    expect(oauthNote({ ...base, oauthUpdatedAt: now - 21 * 60_000 }, now)).toEqual({ text: "updated 21m ago", title: null });
+    expect(oauthNote({ ...base, oauthError: "usage endpoint returned 429" }, now)).toEqual({ text: "updated 1m ago", title: "usage endpoint returned 429" });
+    expect(oauthNote({ ...base, oauthUpdatedAt: null, oauthError: "Not logged in to Claude Code" }, now)).toEqual({ text: "Not logged in to Claude Code", title: "Not logged in to Claude Code" });
+    expect(oauthNote({ ...base, extra: null, oauthError: "x" }, now), "nothing from the endpoint to qualify").toBeNull();
+    const scoped = { kind: "weekly_scoped", label: "7D Fable", usedPct: 1, resetsAt: null, severity: "normal" };
+    expect(oauthNote({ ...base, extra: null, limits: [scoped], oauthError: "x" }, now)).not.toBeNull();
   });
 
   it("extra usage: with a limit, without one, and off", () => {

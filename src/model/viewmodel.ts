@@ -2,7 +2,7 @@
 
 import type { BotStateName } from "../core/layout";
 import type { Agent, Extra, Interaction, Question, Session, Status, Usage } from "../core/types";
-import { firstLine, fmtDuration, fmtMoney, fmtPct, level, type Level } from "./format";
+import { firstLine, fmtAgo, fmtDuration, fmtMoney, fmtPct, level, type Level } from "./format";
 
 export const STATUS_RANK: Record<Status, number> = {
   needs_you: 6, error: 5, working: 4, thinking: 3, finished: 2, idle: 1, stale: 0,
@@ -225,6 +225,18 @@ export function rowLevel(pct: number, severity: string | null | undefined): Leve
   const bySeverity: Level = severity === "critical" ? "crit" : severity === "warning" ? "warn" : "ok";
   const byPct = level(pct);
   return byPct === "crit" || bySeverity === "crit" ? "crit" : byPct === "warn" || bySeverity === "warn" ? "warn" : "ok";
+}
+
+/** The endpoint data (scoped limits, extra usage) counts as old after this long without an answer. */
+export const OAUTH_STALE_MS = 20 * 60_000;
+
+/** A dim note under the scoped and extra rows when the endpoint failed or has not answered for a while. */
+export function oauthNote(u: Usage, now: number): { text: string; title: string | null } | null {
+  if (!u.extra && !u.limits.some((r) => r.kind === "weekly_scoped")) return null;
+  const old = u.oauthUpdatedAt != null && now - u.oauthUpdatedAt > OAUTH_STALE_MS;
+  if (!u.oauthError && !old) return null;
+  const text = u.oauthUpdatedAt != null ? `updated ${fmtAgo(now - u.oauthUpdatedAt)}` : u.oauthError ?? "not updated";
+  return { text, title: u.oauthError };
 }
 
 const EXTRA_REASONS: Record<string, string> = { out_of_credits: "no credits", user_disabled: "turned off" };

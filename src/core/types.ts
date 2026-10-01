@@ -59,7 +59,7 @@ export interface Session {
   plan: string | null;
 }
 
-export interface Limit { usedPct: number; resetsAt: string | number | null }
+export interface Limit { usedPct: number; resetsAt: string | number | null; severity: string }
 export interface LimitRow { kind: string; label: string; usedPct: number; resetsAt: string | number | null; severity: string }
 export interface Extra {
   enabled: boolean;
@@ -80,6 +80,9 @@ export interface Usage {
   source: "statusline" | "oauth" | "none";
   updatedAt: number | null;
   error: string | null;
+  /** When the usage endpoint last answered, and its last error: the scoped limits and extra usage are as old as this. */
+  oauthUpdatedAt: number | null;
+  oauthError: string | null;
   account: Account | null;
 }
 
@@ -97,6 +100,6 @@ export interface Cue {
 
 export const EMPTY_SNAPSHOT: Snapshot = {
   sessions: [],
-  usage: { fiveHour: null, sevenDay: null, limits: [], extra: null, source: "none", updatedAt: null, error: null, account: null },
+  usage: { fiveHour: null, sevenDay: null, limits: [], extra: null, source: "none", updatedAt: null, error: null, oauthUpdatedAt: null, oauthError: null, account: null },
   now: 0,
 };

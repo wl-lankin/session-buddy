@@ -9,7 +9,7 @@ import { colorForProject, VIEW_HEIGHT_SESSION } from "../core/layout";
 import { State } from "../core/state";
 import type { Extra, LimitRow, Session, Usage } from "../core/types";
 import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format";
-import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, recentClass, recentCount, rowLevel, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
+import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, oauthNote, recentClass, recentCount, rowLevel, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { accountWidth } from "../model/size";
 import { bar, enlargeButton, keyed, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
@@ -109,7 +109,7 @@ function limit(row: LimitRow, now: number): Node[] {
       "div",
       { class: scoped ? "a-limit scoped" : "a-limit" },
       h("span", { class: "a-name", text: row.label, title: row.label }),
-      bar(row.usedPct, scoped ? 40 : 62, lvl),
+      bar(row.usedPct, 0, lvl),
       h("span", { class: `a-pct ${lvl}`, text: `${fmtPct(row.usedPct)}%` }),
     ),
     reset ? h("div", { class: scoped ? "a-reset scoped" : "a-reset", text: `resets ${reset}` }) : null,
@@ -135,7 +135,7 @@ function extraRow(e: Extra): Node[] {
 
 function accountBlock(u: Usage, now: number): Node[] {
   const out: Node[] = [h("div", { class: "x-h", text: "LIMITS" })];
-  if (!u.limits.length) {
+  if (!u.limits.length && !u.extra) {
     out.push(h("div", { class: "a-na", text: u.error ? "Limits unavailable" : "Limits n/a" }));
     if (u.error) out.push(h("div", { class: "a-error", text: u.error, title: u.error }));
   } else {
@@ -144,6 +144,10 @@ function accountBlock(u: Usage, now: number): Node[] {
     if (u.error) {
       const ago = u.updatedAt ? `updated ${fmtAgo(now - u.updatedAt)}` : "not updated";
       out.push(h("div", { class: "a-error", text: ago, title: u.error }));
+    } else {
+      // The windows are fine (status line), but the scoped limits and extra usage may be old.
+      const note = oauthNote(u, now);
+      if (note) out.push(h("div", { class: "a-stale", text: note.text, title: note.title ?? undefined }));
     }
   }
   const a = u.account;

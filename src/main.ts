@@ -32,10 +32,20 @@ async function main() {
   });
   await onEvent<null>("hotkey", () => island.toggleFromHotkey());
   await onEvent<null>("screen-changed", () => void Bridge.reposition());
+  // MacBook notch: the window starts at the top of the screen, the island hangs
+  // below it and a black cap joins the two (src-tauri/src/island.rs).
+  await onEvent<{ top: number; width: number }>("notch", ({ top, width }) => {
+    document.documentElement.style.setProperty("--notch-top", `${top}px`);
+    document.documentElement.style.setProperty("--notch-w", `${width}px`);
+    island.setNotch(top, width);
+  });
   await onEvent<Settings>("settings-changed", (s) => {
     State.settings = { ...State.settings, ...s };
     island.applySettings();
   });
+
+  // The first placement ran before the listeners: place again to get "notch".
+  void Bridge.reposition();
 
   const snap = await Bridge.snapshot();
   if (snap) island.onSnapshot(snap);

@@ -62,7 +62,7 @@ npm run pack
 - Windows: run `target/release/bundle/nsis/Session Buddy_1.0.0_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
-On macOS the island hangs centred just below the menu bar, so on a MacBook with a notch it sits under the notch, not over it. On Windows it hangs from the top edge of the screen.
+On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
 
 ## Setup
 

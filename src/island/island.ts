@@ -62,6 +62,11 @@ export class Island {
   private greetingCanvas!: HTMLCanvasElement;
   private countdown!: HTMLElement;
   private grip!: HTMLElement;
+  /** Fills the menu bar strip above the island up to a MacBook notch. */
+  private cap!: HTMLElement;
+  private capBody!: HTMLElement;
+  /** The notch the window leaves room for, logical pixels; zero without one. */
+  private notch = { top: 0, width: 0 };
 
   private strip!: ViewHost;
   private compact!: ViewHost;
@@ -177,8 +182,11 @@ export class Island {
     for (const v of this.views.values()) viewsEl.append(v.el);
     this.contentEl = h("div", { id: "content" }, viewsEl);
 
-    this.clipEl = h("div", { id: "island-clip" }, this.greetingCanvas, this.strip.el, this.compact.el, this.contentEl);
-    this.islandEl = h("div", { id: "island" }, this.clipEl, this.botGlow, this.botCanvas, this.countdown, this.grip);
+    this.clipEl = h("div", { id: "island-clip" }, this.greetingCanvas, this.compact.el, this.contentEl);
+    this.capBody = h("div", { class: "cap-body" });
+    this.cap = h("div", { id: "notch-cap" }, h("i", { class: "cap-shoulder left" }), this.capBody, h("i", { class: "cap-shoulder right" }));
+    // The strip sits outside the clip: next to a notch it lives in the cap, above the island.
+    this.islandEl = h("div", { id: "island" }, this.cap, this.clipEl, this.strip.el, this.botGlow, this.botCanvas, this.countdown, this.grip);
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.greetingCanvas.width = Math.round(GREETING_W * dpr);
@@ -452,10 +460,23 @@ export class Island {
 
   // -- Geometry -------------------------------------------------------------
 
+  /** A MacBook notch (top and width in logical pixels, zero without one): the strip moves beside it. */
+  setNotch(top: number, width: number) {
+    if (top === this.notch.top && width === this.notch.width) return;
+    this.notch = { top, width };
+    document.documentElement.classList.toggle("notched", top > 0);
+    this.strip.sync();
+    this.stripW = this.strip.measure?.() ?? STRIP_W;
+    this.updateBotTargets();
+    this.animateGeometry(false);
+  }
+
   /** The island without a manual size. */
   private naturalSize(): { w: number; h: number } {
     const measured = MEASURED_VIEWS.includes(State.view) ? this.views.get(State.view)?.measure?.() : undefined;
-    return islandSize(State.mode, State.view, measured, this.stripW, this.autoW);
+    const size = islandSize(State.mode, State.view, measured, this.stripW, this.autoW);
+    // Beside a notch the strip is all cap: nothing hangs below the menu bar.
+    return State.mode === "strip" && this.notch.top > 0 ? { w: size.w, h: 0 } : size;
   }
 
   private sizable(): boolean {
@@ -644,22 +665,27 @@ export class Island {
     this.islandEl.style.width = `${w}px`;
     this.islandEl.style.height = `${hh}px`;
     this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
+    // The cap takes over the rounded corners while the island below it is shorter than them.
+    const capR = Math.max(0, Math.min(r, r - hh));
+    this.capBody.style.borderRadius = `0 0 ${capR}px ${capR}px`;
     this.islandEl.style.transform = "translateX(-50%)";
     this.greetingCanvas.style.left = `${(w - GREETING_W) / 2}px`;
     // While the grip is dragged the whole window takes the pointer (see wireGrip).
     const rect = this.dragging
       ? { x: 0, y: 0, w: this.viewportW(), h: window.innerHeight > 0 ? window.innerHeight : this.panel.h }
-      : { x: (this.viewportW() - w) / 2, y: 0, w, h: hh };
+      : this.islandRect();
     const p = this.pushedRect;
-    if (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5) {
+    if (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.y - rect.y) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5) {
       this.pushedRect = rect;
       void Bridge.setIslandRect(rect.x, rect.y, rect.w, rect.h);
     }
   }
 
+  /** The island plus its notch cap, which sits above y = 0. */
   private islandRect() {
     const w = this.width.value;
-    return { x: (this.viewportW() - w) / 2, y: 0, w, h: this.height.value };
+    const top = this.notch.top;
+    return { x: (this.viewportW() - w) / 2, y: -top, w, h: this.height.value + top };
   }
 
   // -- Input ----------------------------------------------------------------
@@ -727,7 +753,8 @@ export class Island {
   onCursor(x: number, y: number) {
     State.mouse = { x, y };
     const rect = this.islandRect();
-    State.mouseInIsland = { x: x - rect.x, y: y - rect.y };
+    // The island's own y starts below the notch cap (rect.y is the cap's top).
+    State.mouseInIsland = { x: x - rect.x, y };
     const inIsland =
       x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
       y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
@@ -765,7 +792,7 @@ export class Island {
   private isBotHit(x: number, y: number): boolean {
     const rect = this.islandRect();
     const cx = rect.x + this.botCx.value;
-    const cy = rect.y + this.botCy.value;
+    const cy = this.botCy.value;
     const radius = this.botSize.value / 2;
     return (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius;
   }
@@ -895,9 +922,11 @@ export class Island {
 
   private updateBotTargets() {
     const p = botPosition(State.mode, State.view);
-    this.botCx.target = p.cx;
-    this.botCy.target = p.cy;
-    this.botSize.target = p.diameter / 0.6;
+    // Beside a notch the strip's Buddy sits in the cap, left of the notch.
+    const inCap = State.mode === "strip" && this.notch.top > 0;
+    this.botCx.target = inCap ? 22 : p.cx;
+    this.botCy.target = inCap ? -this.notch.top / 2 : p.cy;
+    this.botSize.target = (inCap ? 20 : p.diameter) / 0.6;
     const greetingActive = State.mode === "expanded" && State.view === "greeting";
     this.botCanvas.style.opacity = p.opacity > 0 && !greetingActive ? "1" : "0";
     if (State.mode === "expanded" && !greetingActive) {

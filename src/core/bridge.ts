@@ -54,6 +54,7 @@ export const Bridge = {
   boot: () => call<BootInfo>("boot"),
   snapshot: () => call<Snapshot>("snapshot"),
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
+  saveSettingsChecked: (settings: Settings) => attempt<void>("save_settings", { settings }),
   setIslandRect: (x: number, y: number, width: number, height: number) =>
     call<void>("set_island_rect", { x, y, width, height }),
   focusWindow: (focused: boolean) => call<void>("focus_window", { focused }),

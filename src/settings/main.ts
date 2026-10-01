@@ -5,9 +5,15 @@ import "./settings.css";
 import { Bridge } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h } from "../views/dom";
+import { normalizeNumber } from "./helpers";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
-const save = () => void Bridge.saveSettings(settings);
+const statusLine = h("div", { class: "msg top" });
+const save = () => {
+  void Bridge.saveSettingsChecked(settings).then((r) => {
+    statusLine.textContent = r.ok ? "" : `Could not save settings: ${r.error}`;
+  });
+};
 const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
 
 function row(label: string, control: HTMLElement, hint?: string): HTMLElement {
@@ -24,11 +30,11 @@ function checkbox(get: () => boolean, set: (v: boolean) => void): HTMLInputEleme
   return el;
 }
 
-function numberInput(get: () => number, set: (v: number) => void, min: number, max: number, step = 1): HTMLInputElement {
+function numberInput(get: () => number, set: (v: number) => void, min: number, max: number, step = 1, integer = true): HTMLInputElement {
   const el = h("input", { type: "number", min, max, step });
   el.value = String(get());
   el.addEventListener("change", () => {
-    const v = Math.min(max, Math.max(min, Number(el.value) || min));
+    const v = normalizeNumber(el.value, min, max, integer);
     el.value = String(v);
     set(v);
     save();
@@ -58,12 +64,14 @@ function installSection(): HTMLElement {
 
   const refresh = async () => {
     const st = await Bridge.installStatus();
-    status.replaceChildren(
-      line("Hooks", st?.hooksInstalled ? "installed" : "not installed"),
-      line("Status line", st?.statusLineInstalled ? "wrapped (your own status line still runs)" : "not installed"),
-      line("settings.json", st?.settingsPath ?? "?"),
-      line("Relay", st ? `${st.relayPath}${st.relayReady ? "" : "  (missing: restart session-buddy)"}` : "?"),
-    );
+    if (!st) status.replaceChildren(line("Status", "Could not read install status"));
+    else
+      status.replaceChildren(
+        line("Hooks", st.hooksInstalled ? "installed" : "not installed"),
+        line("Status line", st.statusLineInstalled ? "wrapped (your own status line still runs)" : "not installed"),
+        line("settings.json", st.settingsPath),
+        line("Relay", `${st.relayPath}${st.relayReady ? "" : "  (missing: restart session-buddy)"}`),
+      );
     buttons.replaceChildren(
       ...present([
         h("button", { class: "primary", text: st?.hooksInstalled ? "Reinstall..." : "Install...", onclick: () => void preview(true) }),
@@ -101,14 +109,22 @@ function installSection(): HTMLElement {
 
 async function main() {
   const boot = await Bridge.boot();
-  if (boot) settings = { ...settings, ...boot.settings };
   const app = document.getElementById("app");
   if (!app) return;
+  if (!boot) {
+    app.append(
+      h("h1", { text: "session-buddy" }),
+      h("p", { class: "msg", text: "Could not load settings from session-buddy." }),
+      installSection(),
+    );
+    return;
+  }
+  settings = { ...settings, ...boot.settings };
 
   const volume = h("input", { type: "range", min: 0, max: 0.2, step: 0.01 });
-  volume.value = String(settings.soundVolume);
+  volume.value = String(normalizeNumber(settings.soundVolume, 0, 0.2, false));
   volume.addEventListener("change", () => {
-    settings.soundVolume = Number(volume.value);
+    settings.soundVolume = normalizeNumber(volume.value, 0, 0.2, false);
     save();
   });
 
@@ -127,6 +143,7 @@ async function main() {
 
   app.append(
     h("h1", { text: "session-buddy" }),
+    statusLine,
     installSection(),
     h(
       "section",
@@ -158,7 +175,7 @@ async function main() {
       h("h2", { text: "Start-up" }),
       row("Start with the system", checkbox(() => settings.autostart, (v) => (settings.autostart = v))),
     ),
-    h("footer", {}, h("span", { text: `Version ${boot?.version ?? "?"}` }), h("button", { text: "Quit session-buddy", onclick: () => void Bridge.quit() })),
+    h("footer", {}, h("span", { text: `Version ${boot.version}` }), h("button", { text: "Quit session-buddy", onclick: () => void Bridge.quit() })),
   );
 }
 

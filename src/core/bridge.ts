@@ -31,7 +31,7 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 async function attempt<T>(cmd: string, args?: Record<string, unknown>): Promise<Result<T>> {
   if (!IS_TAURI) {
     browserInvoke(cmd, args);
-    return { ok: false, error: "Not running inside session-buddy." };
+    return { ok: false, error: "Not running inside Session Buddy." };
   }
   try {
     return { ok: true, value: await invoke<T>(cmd, args) };

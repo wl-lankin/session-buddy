@@ -57,7 +57,7 @@ fn store_saved_status_line(v: Option<&Value>) -> Result<(), String> {
 fn require_relay(install: bool) -> Result<(), String> {
     let relay = sb_common::relay_path();
     if install && !relay.is_file() {
-        return Err(format!("The relay is missing at {}. Restart session-buddy so it can put it there, then install again.", relay.display()));
+        return Err(format!("The relay is missing at {}. Restart Session Buddy so it can put it there, then install again.", relay.display()));
     }
     Ok(())
 }

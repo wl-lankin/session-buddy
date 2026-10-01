@@ -179,7 +179,7 @@ pub fn show_settings_window(app: &AppHandle) {
         return;
     }
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-        .title("session-buddy settings")
+        .title("Session Buddy settings")
         .inner_size(600.0, 680.0)
         .resizable(true)
         .build();

@@ -57,7 +57,7 @@ pub fn hook_output(kind: WaitKind, original: &Value, answer: &Value) -> Option<S
         WaitKind::Permission => {
             let decision = match answer.get("behavior")?.as_str()? {
                 "allow" => json!({"behavior": "allow"}),
-                "deny" => json!({"behavior": "deny", "message": "Denied from session-buddy"}),
+                "deny" => json!({"behavior": "deny", "message": "Denied from Session Buddy"}),
                 _ => return None,
             };
             Some(
@@ -152,7 +152,7 @@ mod tests {
         let deny = hook_output(WaitKind::Permission, &json!({}), &json!({"behavior":"deny"})).unwrap();
         assert_eq!(
             parse(&deny),
-            json!({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from session-buddy"}}})
+            json!({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Session Buddy"}}})
         );
         assert!(hook_output(WaitKind::Permission, &json!({}), &json!({"behavior":"maybe"})).is_none());
     }

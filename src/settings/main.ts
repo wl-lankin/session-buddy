@@ -2,10 +2,21 @@
 // sounds, island timing, sessions, start-up.
 
 import "./settings.css";
-import { Bridge } from "../core/bridge";
+import { Bridge, IS_TAURI, type BootInfo, type InstallStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h } from "../views/dom";
 import { normalizeNumber } from "./helpers";
+
+// ?demo=1 in a plain browser: a fake boot result for the README screenshots.
+const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "1";
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS }, version: "1.0.0" };
+const DEMO_STATUS: InstallStatus = {
+  hooksInstalled: true,
+  statusLineInstalled: true,
+  settingsPath: String.raw`C:\Users\alex\.claude\settings.json`,
+  relayPath: String.raw`C:\Users\alex\AppData\Local\session-buddy\bin\sb-relay.exe`,
+  relayReady: true,
+};
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 const statusLine = h("div", { class: "msg top" });
@@ -55,7 +66,7 @@ function installSection(): HTMLElement {
     "section",
     {},
     h("h2", { text: "Claude Code" }),
-    h("p", { class: "note", text: "Adds session-buddy's hooks and wraps your status line. A dated backup of settings.json is taken first; only session-buddy's own entries are ever added or removed. New Claude Code sessions pick it up; restart running ones." }),
+    h("p", { class: "note", text: "Adds Session Buddy's hooks and wraps your status line. A dated backup of settings.json is taken first; only Session Buddy's own entries are ever added or removed. New Claude Code sessions pick it up; restart running ones." }),
     status,
     buttons,
     diff,
@@ -63,14 +74,14 @@ function installSection(): HTMLElement {
   );
 
   const refresh = async () => {
-    const st = await Bridge.installStatus();
+    const st = DEMO ? DEMO_STATUS : await Bridge.installStatus();
     if (!st) status.replaceChildren(line("Status", "Could not read install status"));
     else
       status.replaceChildren(
         line("Hooks", st.hooksInstalled ? "installed" : "not installed"),
         line("Status line", st.statusLineInstalled ? "wrapped (your own status line still runs)" : "not installed"),
         line("settings.json", st.settingsPath),
-        line("Relay", `${st.relayPath}${st.relayReady ? "" : "  (missing: restart session-buddy)"}`),
+        line("Relay", `${st.relayPath}${st.relayReady ? "" : "  (missing: restart Session Buddy)"}`),
       );
     buttons.replaceChildren(
       ...present([
@@ -108,13 +119,13 @@ function installSection(): HTMLElement {
 }
 
 async function main() {
-  const boot = await Bridge.boot();
+  const boot = DEMO ? DEMO_BOOT : await Bridge.boot();
   const app = document.getElementById("app");
   if (!app) return;
   if (!boot) {
     app.append(
-      h("h1", { text: "session-buddy" }),
-      h("p", { class: "msg", text: "Could not load settings from session-buddy." }),
+      h("h1", { text: "Session Buddy settings" }),
+      h("p", { class: "msg", text: "Could not load settings from Session Buddy." }),
       installSection(),
     );
     return;
@@ -155,7 +166,7 @@ async function main() {
   });
 
   app.append(
-    h("h1", { text: "session-buddy" }),
+    h("h1", { text: "Session Buddy settings" }),
     statusLine,
     installSection(),
     h(
@@ -189,8 +200,12 @@ async function main() {
       h("h2", { text: "Start-up" }),
       row("Start with the system", checkbox(() => settings.autostart, (v) => (settings.autostart = v))),
     ),
-    h("footer", {}, h("span", { text: `Version ${boot.version}` }), h("button", { text: "Quit session-buddy", onclick: () => void Bridge.quit() })),
+    h("footer", {}, h("span", { text: `Version ${boot.version}` }), h("button", { text: "Quit Session Buddy", onclick: () => void Bridge.quit() })),
   );
+  if (DEMO) {
+    await document.fonts.ready;
+    document.body.dataset.ready = "1";
+  }
 }
 
 void main();

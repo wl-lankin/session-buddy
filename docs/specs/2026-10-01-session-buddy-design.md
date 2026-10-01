@@ -33,11 +33,14 @@ One Tauri 2 codebase for Windows 10/11 and macOS 15+. The island sits at the top
 
 ```
 session-buddy/
-  app/          TypeScript front end, no framework: Mochi, island, views, settings window
-  src-tauri/    Rust: window, IPC server, session store, usage, settings merge, tray
+  src/          TypeScript front end, no framework: Mochi, island, views, settings window
+  common/       sb-common: paths and pipe/socket names shared by app and relay
+  core/         sb-core: session store, hub (relay protocol), transcript bootstrap,
+                usage parsing, settings.json merge - pure Rust, no Tauri, fully unit tested
+  src-tauri/    Rust app: window, IPC listener, pollers, commands, tray
   hook/         sb-relay binary: hook relay + status-line wrapper
   dev/          browser preview with fake sessions
-  docs/specs/   this spec and the implementation plan
+  docs/         spec and implementation plan
 ```
 
 ### 4.1 Relay (`sb-relay`)
@@ -46,7 +49,7 @@ One small binary with two modes.
 
 **Hook mode** (`sb-relay hook <EventName>`), registered for: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Notification`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`.
 
-- Reads the hook JSON from stdin, adds `term_program` and, on `SessionStart`, the git branch of `cwd`.
+- Reads the hook JSON from stdin and adds `term_program`. (The git branch is looked up by the app, off the hook path, at most every 30 s per session.)
 - Connects to the app (Windows: named pipe `\\.\pipe\session-buddy-<user>`; macOS: Unix socket `~/Library/Application Support/session-buddy/sb.sock`) with a 100 ms connect timeout. No app means exit 0 with no output.
 - Fire-and-forget for all events except the three blocking cases below.
 
@@ -55,16 +58,14 @@ One small binary with two modes.
 | Event | Wait deadline | Output on answer |
 |---|---|---|
 | `PermissionRequest` | 110 s | `hookSpecificOutput.decision.behavior` = `allow` / `deny` |
-| `PreToolUse` with `tool_name == "AskUserQuestion"` | 540 s | `permissionDecision: "allow"` + `updatedInput` = original input + `answers` (keyed by question text; string, or array of labels for multi-select; free text for "Other") |
+| `PreToolUse` with `tool_name == "AskUserQuestion"` | 540 s | `permissionDecision: "allow"` + `updatedInput` = original input + `answers` (keyed by question text, value always a string: the option label, multi-select labels joined with `", "`, or the free text for "Other"; this matches the tool's `answers: Record<string, string>` schema) |
 | `Stop` where `last_assistant_message` ends with `?` (after trimming) and `stop_hook_active == false` | 540 s | `{"decision":"block","reason":"<user reply>"}` |
 
 "Answer in terminal", deadline expiry, app crash or a closed pipe all produce **no output**, so Claude Code continues with its normal terminal flow. Verified on 2026-10-01 (Claude Code 2.1.286): a `PreToolUse` hook returning `updatedInput.answers` for `AskUserQuestion` delivers the answer and suppresses the terminal picker.
 
 **Status-line mode** (`sb-relay statusline`), installed as `statusLine.command`:
 
-1. Reads the status-line JSON from stdin.
-2. Sends it to the app (100 ms timeout, skipped if unreachable).
-3. Runs the user's original status-line command (saved at install time) with the same stdin and prints its stdout unchanged. If there was no original command, prints nothing.
+The installed command is a pipe: `"<relay>" statusline | <original command>`. The relay copies stdin to stdout first (so the user's own status line gets exactly the same JSON, run by the same shell Claude Code uses), then forwards the JSON to the app (skipped if unreachable). With no original command it is `"<relay>" statusline --quiet`, which prints nothing. The original `statusLine` value is saved in `<config>/install.json` and restored on uninstall.
 
 ### 4.2 Session store (Rust, single source of truth)
 
@@ -148,7 +149,7 @@ Bars are orange at >= 70 %, red at >= 90 %. Optional sound when a session crosse
   - Plain-text question: Claude's last message, reply box, Send.
   - Every card has "Answer in terminal".
 - Several pending interactions queue per session and across sessions; nothing replaces another.
-- Keys: left / right or Tab switch sessions, 1-9 jump, Esc collapses, Enter submits the focused card. Global hotkey `Ctrl+Alt+Space` (Windows) / `Option+Cmd+Space` (macOS) opens the island.
+- Keys: left / right or Tab switch sessions, 1-9 jump, Esc collapses, Enter submits the focused card. Global hotkey, default `Ctrl+Alt+Space` on both systems (on macOS that is Control+Option+Space; Option+Cmd+Space is taken by Finder search), configurable in Settings, opens the island and gives it keyboard focus. Without the hotkey the island never takes focus, so keys only work after it.
 - Finished: Mochi jumps, finish sound, Claude's last message shown briefly.
 - Mochi keeps all existing behaviour (hover, poke, dizzy, hearts, greeting on launch). Sounds play exactly as in Coucou.
 

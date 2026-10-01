@@ -9,10 +9,10 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same branch or PR cancels the run that is still going.
+# A newer push to the same PR cancels the run that is still going; runs on main always finish.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:

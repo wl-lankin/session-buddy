@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Latest release](https://img.shields.io/github/v/release/wl-lankin/session-buddy?include_prereleases&sort=semver&label=version&color=22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 

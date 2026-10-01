@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Latest release](https://img.shields.io/github/v/release/wl-lankin/session-buddy?include_prereleases&sort=semver&label=version&color=22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
@@ -130,3 +130,8 @@ Based on [Coucou](https://github.com/Louis-CFM/coucou) by Louis Raille (MIT). Bu
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+---
+
+<p align="center">Made with ♥ by <a href="https://wolfgang-linz.de">Wolfgang Linz</a></p>
+<p align="center"><sub>Based on <a href="https://github.com/Louis-CFM/coucou">Coucou</a> by Louis Raille (MIT)</sub></p>

@@ -727,12 +727,13 @@ body {
 .i-q { display: flex; flex-direction: column; gap: 5px; }
 .i-qtext { font: 600 13px var(--font); color: var(--ink); }
 .chip { align-self: flex-start; font: 700 9.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--cyan); }
-.i-options { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Equal columns, as many as fit: three options sit side by side and a row is as tall as its tallest. */
+.i-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; }
 .opt {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
-  max-width: 260px;
+  min-width: 0;
   padding: 5px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 9px;

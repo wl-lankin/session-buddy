@@ -201,12 +201,36 @@ pub fn show_settings_window(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    if let Ok(w) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Session Buddy settings")
         .inner_size(600.0, 680.0)
         .resizable(true)
-        .build();
+        .build()
+    {
+        no_browser_keys(&w);
+    }
 }
+
+/// Windows: WebView2's own reload, print, find, zoom and devtools keys are off (editing keys stay).
+/// The page blocks the same keys too (src/core/nobrowser.ts), this also covers keys it never sees.
+#[cfg(windows)]
+fn no_browser_keys(w: &tauri::WebviewWindow) {
+    let _ = w.with_webview(|wv| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+        use windows_core::Interface;
+        // SAFETY: COM calls on the webview's own controller, run by tauri on the webview thread.
+        unsafe {
+            let Ok(core) = wv.controller().CoreWebView2() else { return };
+            let Ok(settings) = core.Settings() else { return };
+            if let Ok(s3) = settings.cast::<ICoreWebView2Settings3>() {
+                let _ = s3.SetAreBrowserAcceleratorKeysEnabled(false);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn no_browser_keys(_w: &tauri::WebviewWindow) {}
 
 fn register_hotkey(app: &AppHandle, accelerator: &str) {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -372,6 +396,7 @@ pub fn run() {
             let shared = handle.state::<Shared>();
             if let Some(win) = island::window(&handle) {
                 island::prepare(&win);
+                no_browser_keys(&win);
             }
             let (screen, autostart_on) = {
                 let s = shared.settings.lock().unwrap();

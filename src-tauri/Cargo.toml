@@ -27,6 +27,9 @@ sb-core = { path = "../core" }
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6"
+# The versions tauri already uses: only to switch off WebView2's browser accelerator keys.
+webview2-com = "0.39"
+windows-core = "0.62"
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",

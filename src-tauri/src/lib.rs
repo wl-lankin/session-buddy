@@ -4,6 +4,7 @@ mod autostart;
 mod install;
 mod ipc;
 mod island;
+mod links;
 mod log;
 mod process;
 mod settings;
@@ -169,6 +170,11 @@ fn log(message: String) {
 }
 
 #[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    links::open(&url)
+}
+
+#[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
@@ -325,7 +331,7 @@ pub fn run() {
         .manage(shared)
         .invoke_handler(tauri::generate_handler![
             boot, snapshot, save_settings, set_island_rect, focus_window, reposition, ack, answer, release,
-            install_status, install_preview, install_write, open_settings_window, log, quit_app
+            install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

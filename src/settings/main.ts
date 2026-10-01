@@ -6,6 +6,7 @@ import { Bridge, IS_TAURI, type BootInfo, type InstallStatus } from "../core/bri
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h } from "../views/dom";
 import { normalizeNumber } from "./helpers";
+import { buddyMark } from "./mark";
 
 // ?demo=1 in a plain browser: a fake boot result for the README screenshots.
 const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "1";
@@ -118,6 +119,50 @@ function installSection(): HTMLElement {
   return box;
 }
 
+const AUTHOR_URL = "https://wolfgang-linz.de";
+const COUCOU_URL = "https://github.com/Louis-CFM/coucou";
+
+/** A link that opens in the default browser (through Rust's allow-list), never inside the settings window. */
+function link(text: string, url: string, cls = ""): HTMLElement {
+  return h("a", {
+    class: `link ${cls}`.trim(),
+    href: url,
+    title: url,
+    onclick: (e: Event) => {
+      e.preventDefault();
+      void Bridge.openLink(url);
+    },
+  }, text);
+}
+
+function footer(version: string): HTMLElement {
+  return h(
+    "footer",
+    {},
+    h(
+      "div",
+      { class: "foot-row" },
+      h(
+        "div",
+        { class: "made" },
+        buddyMark(22),
+        h("span", { text: "Made with" }),
+        h("span", { class: "heart", "aria-label": "love", text: "♥" }),
+        h("span", { text: "by" }),
+        link("Wolfgang Linz", AUTHOR_URL, "author"),
+      ),
+      h("button", { class: "quit", text: "Quit Session Buddy", onclick: () => void Bridge.quit() }),
+    ),
+    h(
+      "div",
+      { class: "foot-meta" },
+      h("span", { class: "ver", text: `Session Buddy ${version}` }),
+      h("span", { class: "sep", text: "·" }),
+      h("span", {}, "based on ", link("Coucou", COUCOU_URL), " by Louis Raille (MIT)"),
+    ),
+  );
+}
+
 async function main() {
   const boot = DEMO ? DEMO_BOOT : await Bridge.boot();
   const app = document.getElementById("app");
@@ -201,7 +246,7 @@ async function main() {
       h("h2", { text: "Start-up" }),
       row("Start with the system", checkbox(() => settings.autostart, (v) => (settings.autostart = v))),
     ),
-    h("footer", {}, h("span", { text: `Version ${boot.version}` }), h("button", { text: "Quit Session Buddy", onclick: () => void Bridge.quit() })),
+    footer(boot.version),
   );
   if (DEMO) {
     await document.fonts.ready;

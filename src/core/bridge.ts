@@ -71,6 +71,8 @@ export const Bridge = {
   installWrite: (install: boolean, fingerprint: string) => attempt<string>("install_write", { install, fingerprint }),
   openSettingsWindow: () => call<void>("open_settings_window"),
   log: (message: string) => call<void>("log", { message }),
+  /** Opens one of the settings footer links (Rust accepts only those). */
+  openLink: (url: string) => call<void>("open_link", { url }),
   quit: () => call<void>("quit_app"),
 };
 

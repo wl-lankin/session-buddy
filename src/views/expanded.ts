@@ -359,6 +359,14 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   const tabsEl = h("div", { class: "x-tabs" });
   const enlarge = enlargeButton(() => actions.toggleEnlarge());
   const pin = pinButton(() => actions.togglePin());
+  const settingsBtn = h("button", {
+    class: "enlarge",
+    title: "Settings",
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      actions.openSettings();
+    },
+  }, svg(ICONS.gear, 14));
   const fold = h("button", {
     class: "enlarge",
     title: "Minimize to the strip",
@@ -540,7 +548,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { class: "view session-view" },
-    h("div", { class: "blk x-tabs-blk" }, tabsEl, pin.el, enlarge.el, fold),
+    h("div", { class: "blk x-tabs-blk" }, tabsEl, settingsBtn, pin.el, enlarge.el, fold),
     h("div", { class: "x-main" }, sessionEl, accountEl),
   );
   let acctW = accountWidth(0);

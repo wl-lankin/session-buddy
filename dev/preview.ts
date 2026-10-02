@@ -90,6 +90,13 @@ if (!QUIET) setTimeout(() => {
   push();
 }, 30_000);
 
+// A plan that can be answered: feedback rejects it, "Approve in terminal" hands it over.
+if (!QUIET) setTimeout(() => {
+  const item = { kind: "plan" as const, requestId: "r-plan", plan: PLAN, deadline: Date.now() + 9 * 60_000 };
+  snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === "a" ? { ...s, plan: PLAN, pending: [item], status: "needs_you" as const } : s)) };
+  push();
+}, 45_000);
+
 const setManaged = (patch: Partial<Snapshot["sessions"][number]>) => {
   snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === "w1" ? { ...s, ...patch } : s)) };
   push();

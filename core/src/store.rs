@@ -86,6 +86,8 @@ pub enum Interaction {
     Approval { request_id: String, tool: String, target: String, agent_id: Option<String>, deadline: i64 },
     Question { request_id: String, questions: Value, deadline: i64 },
     Reply { request_id: String, message: String, deadline: i64 },
+    /// ExitPlanMode: the island can reject the plan with feedback; approving happens in the terminal's own dialog.
+    Plan { request_id: String, plan: String, deadline: i64 },
 }
 
 impl Interaction {
@@ -93,7 +95,8 @@ impl Interaction {
         match self {
             Interaction::Approval { request_id, .. }
             | Interaction::Question { request_id, .. }
-            | Interaction::Reply { request_id, .. } => request_id,
+            | Interaction::Reply { request_id, .. }
+            | Interaction::Plan { request_id, .. } => request_id,
         }
     }
 }
@@ -148,7 +151,7 @@ pub struct Session {
     /// When the latest turn started with a UserPromptSubmit (typed or wrapped).
     #[serde(skip)]
     pub prompt_at: Option<i64>,
-    /// The plan Claude Code is asking to approve (ExitPlanMode). Answered only in the terminal.
+    /// The plan Claude Code is asking to approve (ExitPlanMode); read-only here, see `Interaction::Plan` for the answerable one.
     pub plan: Option<String>,
     /// A background session started by Session Buddy itself: the island may send it prompts and stop it.
     pub managed: bool,
@@ -452,6 +455,10 @@ impl Store {
         (self.apply_hook(p, now), taken)
     }
 
+    pub fn has_pending(&self, request_id: &str) -> bool {
+        self.sessions.values().any(|s| s.pending.iter().any(|x| x.request_id() == request_id))
+    }
+
     pub fn snapshot(&self) -> Vec<Session> {
         let mut list: Vec<Session> = self.sessions.values().cloned().collect();
         list.sort_by(|a, b| a.started_at.cmp(&b.started_at).then_with(|| a.id.cmp(&b.id)));
@@ -531,6 +538,16 @@ impl Store {
         let is_plan = tool == "ExitPlanMode";
         let plan_text = s(input, "plan").map(|t| clip(t, 8_000));
 
+        // The turn went on without the island's answer (the terminal dialog was used): the card is stale.
+        let plan_over = match event {
+            "UserPromptSubmit" | "Stop" | "StopFailure" => true,
+            "PostToolUse" | "PostToolUseFailure" => is_plan,
+            _ => false,
+        };
+        if plan_over && agent_id.is_none() {
+            sess.pending.retain(|x| !matches!(x, Interaction::Plan { .. }));
+        }
+
         let mut cues = Vec::new();
         let mut finished_turn = None;
         let mut busy = false;
@@ -607,8 +624,21 @@ impl Store {
                     sess.set_status(Status::Working, now);
                 }
             }
-            // Never a pending card: Claude Code ignores a hook answer for ExitPlanMode.
-            "PermissionRequest" if is_plan => sess.plan = plan_text.or(Some(String::new())),
+            // Claude Code ignores an allow for ExitPlanMode, so the card can only reject with feedback.
+            // Without a request id (old relay, setting off) the plan stays read-only.
+            "PermissionRequest" if is_plan => {
+                let announced = sess.plan.is_some();
+                sess.plan = plan_text.or(Some(String::new()));
+                if let (Some(request_id), None) = (request_id, &agent_id) {
+                    let plan = sess.plan.clone().unwrap_or_default();
+                    sess.pending.push_back(Interaction::Plan { request_id, plan, deadline });
+                    sess.set_status(Status::NeedsYou, now);
+                    // The read-only plan already made the island announce itself.
+                    if !announced {
+                        cue(CueKind::Approval);
+                    }
+                }
+            }
             "PermissionRequest" => {
                 if let Some(request_id) = request_id {
                     sess.pending.push_back(Interaction::Approval {
@@ -744,6 +774,9 @@ impl Store {
         for sess in self.sessions.values_mut() {
             let Some(i) = sess.pending.iter().position(|x| x.request_id() == request_id) else { continue };
             let item = sess.pending.remove(i).expect("index from position");
+            if answered && matches!(item, Interaction::Plan { .. }) {
+                sess.plan = None;
+            }
             let next = match (item, answered) {
                 (Interaction::Reply { .. }, true) => Status::Thinking,
                 (Interaction::Reply { .. }, false) => Status::Finished,
@@ -1425,14 +1458,121 @@ mod tests {
         assert!(v[0]["plan"].is_string());
     }
 
+    fn plan_request(request_id: Option<&str>, extra: Value) -> Value {
+        let mut v = ev("PermissionRequest", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "## Plan"}}));
+        if let Some(id) = request_id {
+            v["sb_request_id"] = json!(id);
+            v["sb_wait_ms"] = json!(110_000);
+        }
+        for (k, val) in extra.as_object().unwrap() {
+            v[k] = val.clone();
+        }
+        v
+    }
+
+    fn plan_pre() -> Value {
+        ev("PreToolUse", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "## Plan"}}))
+    }
+
     #[test]
-    fn exit_plan_mode_never_becomes_a_pending_card() {
-        // Even with a request id (an old blocking relay): Claude Code ignores the hook answer.
+    fn a_waited_plan_becomes_a_pending_plan_card() {
         let mut st = Store::default();
-        let cues = st.apply_hook(&ev("PermissionRequest", json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "x"}, "sb_request_id": "r1", "sb_wait_ms": 1})), T0);
+        st.apply_hook(&plan_pre(), T0);
+        let cues = st.apply_hook(&plan_request(Some("r1"), json!({})), T0 + 1);
+        let s = sess(&st);
+        assert_eq!(s.status, Status::NeedsYou);
+        assert_eq!(s.pending[0], Interaction::Plan { request_id: "r1".into(), plan: "## Plan".into(), deadline: T0 + 1 + 110_000 });
+        assert_eq!(s.plan.as_deref(), Some("## Plan"), "the read-only plan stays");
+        assert!(cues.is_empty(), "the read-only plan already announced it");
+        let v = serde_json::to_value(st.snapshot()).unwrap();
+        assert_eq!(v[0]["pending"][0]["kind"], "plan");
+        assert_eq!(v[0]["pending"][0]["requestId"], "r1");
+        assert_eq!(v[0]["pending"][0]["plan"], "## Plan");
+        assert_eq!(v[0]["pending"][0]["deadline"], T0 + 1 + 110_000);
+    }
+
+    #[test]
+    fn a_plan_request_alone_announces_itself_once() {
+        let mut st = Store::default();
+        let cues = st.apply_hook(&plan_request(Some("r1"), json!({})), T0);
+        assert_eq!(cues.iter().map(|c| c.kind).collect::<Vec<_>>(), vec![CueKind::Approval]);
+    }
+
+    #[test]
+    fn a_long_plan_card_is_clipped() {
+        let mut st = Store::default();
+        st.apply_hook(&plan_request(Some("r1"), json!({"tool_input": {"plan": "y".repeat(9_000)}})), T0);
+        let Interaction::Plan { plan, .. } = &sess(&st).pending[0] else { panic!("plan card") };
+        assert_eq!(plan.chars().count(), 8_000);
+    }
+
+    #[test]
+    fn a_plan_request_without_an_id_or_from_a_subagent_stays_read_only() {
+        let mut st = Store::default();
+        let cues = st.apply_hook(&plan_request(None, json!({})), T0);
         assert!(cues.is_empty());
         assert!(sess(&st).pending.is_empty());
-        assert_eq!(sess(&st).plan.as_deref(), Some("x"));
+        assert_eq!(sess(&st).plan.as_deref(), Some("## Plan"));
+        st.apply_hook(&plan_request(Some("r2"), json!({"agent_id": "a1"})), T0 + 1);
+        assert!(sess(&st).pending.is_empty());
+    }
+
+    #[test]
+    fn an_answered_plan_clears_the_card_and_the_plan() {
+        let mut st = Store::default();
+        st.apply_hook(&plan_request(Some("r1"), json!({})), T0);
+        assert_eq!(st.resolve("r1", true, T0 + 5), Some("s1".into()));
+        let s = sess(&st);
+        assert!(s.pending.is_empty());
+        assert_eq!(s.plan, None);
+        assert_eq!(s.status, Status::Working);
+    }
+
+    #[test]
+    fn a_released_plan_keeps_the_read_only_plan_for_the_terminal_dialog() {
+        let mut st = Store::default();
+        st.apply_hook(&plan_request(Some("r1"), json!({})), T0);
+        assert_eq!(st.resolve("r1", false, T0 + 5), Some("s1".into()));
+        let s = sess(&st);
+        assert!(s.pending.is_empty());
+        assert_eq!(s.plan.as_deref(), Some("## Plan"));
+        assert_ne!(s.status, Status::NeedsYou);
+    }
+
+    #[test]
+    fn the_plan_card_goes_when_the_turn_goes_on() {
+        let mut parallel = Store::default();
+        parallel.apply_hook(&plan_request(Some("r1"), json!({})), T0);
+        parallel.apply_hook(&ev("PostToolUse", json!({"tool_name": "Read"})), T0 + 1);
+        assert_eq!(sess(&parallel).pending.len(), 1, "another tool finishing does not drop it");
+        parallel.apply_hook(&ev("PreToolUse", json!({"tool_name": "Read", "agent_id": "a1"})), T0 + 2);
+        assert_eq!(sess(&parallel).pending.len(), 1, "nor does a subagent");
+        for next in [
+            ev("PostToolUse", json!({"tool_name": "ExitPlanMode"})),
+            ev("PostToolUseFailure", json!({"tool_name": "ExitPlanMode"})),
+            ev("UserPromptSubmit", json!({"prompt": "go"})),
+            ev("Stop", json!({})),
+            ev("StopFailure", json!({})),
+        ] {
+            let mut st = Store::default();
+            st.apply_hook(&plan_request(Some("r1"), json!({})), T0);
+            st.apply_hook(&next, T0 + 1);
+            let s = sess(&st);
+            assert!(s.pending.is_empty(), "{}", next["hook_event_name"]);
+            assert_ne!(s.status, Status::NeedsYou, "{}", next["hook_event_name"]);
+            assert_eq!(st.resolve("r1", true, T0 + 2), None);
+        }
+    }
+
+    #[test]
+    fn a_plan_card_waits_without_going_stale_and_ends_with_its_session() {
+        let mut st = Store::default();
+        st.apply_hook(&plan_request(Some("r1"), json!({})), T0);
+        st.tick(T0 + 3_600_000);
+        assert_eq!(sess(&st).status, Status::NeedsYou);
+        st.apply_hook(&ev("SessionEnd", json!({})), T0 + 3_600_001);
+        assert!(st.get("s1").is_none());
+        assert_eq!(st.resolve("r1", false, T0 + 3_600_002), None);
     }
 
     #[test]

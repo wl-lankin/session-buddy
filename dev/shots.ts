@@ -1,6 +1,6 @@
 // Renders the island in one fixed state for the README screenshots
 // (scripts/screenshots.mjs). Pick it with ?state=strip|compact|expanded|approval|
-// question|reply|plan|finished|finished-merged|chat|chat-empty|chat-off. Made-up demo data only. Nothing
+// question|reply|plan|plan-answer|finished|finished-merged|chat|chat-empty|chat-off. Made-up demo data only. Nothing
 // here cycles: the page drives the island once, waits for it to settle and sets
 // document.body.dataset.ready = "1".
 
@@ -123,6 +123,8 @@ const PLAN = [
   "```",
 ].join("\n");
 
+const PLAN_ITEM: Interaction = { kind: "plan", requestId: "r-plan", deadline: NOW + 9 * MIN, plan: PLAN };
+
 const snap = (list: Session[]): Snapshot => ({ sessions: list, usage: USAGE, now: NOW, actions: [] });
 const withSession = (list: Session[], id: string, p: Partial<Session>) => list.map((s) => (s.id === id ? { ...s, ...p } : s));
 const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
@@ -172,6 +174,10 @@ async function run() {
       for (const a of demoChat(NOW, state === "chat" ? "full" : state === "chat-empty" ? "empty" : "off")) island.chatDispatch(a);
       island.open();
       island.openChat();
+      break;
+    case "plan-answer":
+      island.onSnapshot(snap(list));
+      island.onSnapshot(snap(withSession(list, "shop", { status: "needs_you", plan: PLAN, pending: [PLAN_ITEM] })));
       break;
     case "plan":
       island.onSnapshot(snap(list));

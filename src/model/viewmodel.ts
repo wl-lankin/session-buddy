@@ -42,7 +42,7 @@ export function botStateFor(s: Session | null): BotStateName {
   if (!s) return "idle";
   switch (s.status) {
     case "needs_you":
-      return s.pending[0]?.kind === "approval" ? "approval" : "question";
+      return s.pending[0]?.kind === "approval" || s.pending[0]?.kind === "plan" ? "approval" : "question";
     case "error": return "error";
     case "working": return "working";
     case "thinking": return "thinking";
@@ -112,6 +112,7 @@ export function currentActivity(s: Session): string {
   if (p) {
     if (p.kind === "approval") return `Waiting for you: ${p.target}`;
     if (p.kind === "question") return `Question: ${firstLine(p.questions[0]?.question)}`;
+    if (p.kind === "plan") return `Plan waits for you: ${firstLine(p.plan)}`;
     return `Asked: ${firstLine(p.message)}`;
   }
   switch (s.status) {

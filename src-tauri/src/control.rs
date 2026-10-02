@@ -366,6 +366,7 @@ fn pending_json(i: &Interaction) -> Value {
             json!({"kind": "question", "target": clip(first, 120)})
         }
         Interaction::Reply { message, .. } => json!({"kind": "reply", "target": clip(message, 120)}),
+        Interaction::Plan { plan, .. } => json!({"kind": "plan", "target": clip(plan, 120)}),
     }
 }
 

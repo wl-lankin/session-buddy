@@ -6,6 +6,11 @@ describe("reactionFor", () => {
     expect(reactionFor({ kind: "sound", on: true })).toEqual({ emote: "yawn" });
     expect(reactionFor({ kind: "sound", on: false })).toBeNull();
   });
+  it("the plan switch reacts like the chat switch", () => {
+    expect(reactionFor({ kind: "plan", on: true })?.emote).toBe("wink");
+    expect(reactionFor({ kind: "plan", on: false })?.emote).toBe("yawn");
+  });
+
   it("winks for chat on, yawns for chat off", () => {
     expect(reactionFor({ kind: "chat", on: true })?.emote).toBe("wink");
     expect(reactionFor({ kind: "chat", on: false })?.emote).toBe("yawn");

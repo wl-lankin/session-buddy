@@ -168,6 +168,7 @@ export class Island {
         Sound.play("blip");
         void Bridge.release(requestId);
       },
+      focusTerminal: (sessionId) => void this.focusTerminal(sessionId),
       openSettings: () => void Bridge.openSettingsWindow(),
       wantKeyboard: (on) => this.setKeyboard(on),
       relayout: () => this.animateGeometry(false),
@@ -578,6 +579,13 @@ export class Island {
     if (State.mode !== "expanded") this.fsm.forceHome();
     this.expand("plan");
     this.rearmCollapse();
+  }
+
+  private async focusTerminal(sessionId: string) {
+    const error = await Bridge.focusTerminal(sessionId);
+    if (!error) return;
+    State.notice = { text: error, until: performance.now() + 2600 };
+    State.notify();
   }
 
   private async answer(requestId: string, answer: unknown) {

@@ -22,6 +22,7 @@ pub fn prepare(
     arg_event: &str,
     cwd: &str,
     term_program: &str,
+    plan_wait: bool,
     claude_pid: impl FnOnce() -> Option<u32>,
 ) -> Option<Prepared> {
     let bytes = raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(raw);
@@ -44,7 +45,7 @@ pub fn prepare(
         map.insert("cwd".into(), Value::String(cwd.to_string()));
     }
 
-    let wait = wait_kind(&original);
+    let wait = wait_kind(&original, plan_wait);
 
     let mut fwd = original.clone();
     let fmap = fwd.as_object_mut()?;
@@ -148,7 +149,7 @@ mod tests {
     fn strips_bom_and_fills_event_cwd_and_terminal() {
         let mut raw = vec![0xEF, 0xBB, 0xBF];
         raw.extend_from_slice(br#"{"session_id":"s1","transcript_path":"x"}"#);
-        let p = prepare(&raw, "SessionStart", "C:/work", "WarpTerminal", no_pid).unwrap();
+        let p = prepare(&raw, "SessionStart", "C:/work", "WarpTerminal", false, no_pid).unwrap();
         let v = fwd(&p);
         assert_eq!(v["hook_event_name"], "SessionStart");
         assert_eq!(v["cwd"], "C:/work");
@@ -162,18 +163,18 @@ mod tests {
     #[test]
     fn keeps_tool_response_only_for_agents_and_command_output() {
         let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":{"file":{"content":"secret"}}}"#;
-        assert!(fwd(&prepare(raw, "", "", "", no_pid).unwrap()).get("tool_response").is_none());
+        assert!(fwd(&prepare(raw, "", "", "", false, no_pid).unwrap()).get("tool_response").is_none());
         let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_response":{"agentId":"a1","description":"d"}}"#;
-        assert_eq!(fwd(&prepare(raw, "", "", "", no_pid).unwrap())["tool_response"]["agentId"], "a1");
+        assert_eq!(fwd(&prepare(raw, "", "", "", false, no_pid).unwrap())["tool_response"]["agentId"], "a1");
         let raw = br#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"stdout":"ok","stderr":"","interrupted":false}}"#;
-        assert_eq!(fwd(&prepare(raw, "", "", "", no_pid).unwrap())["tool_response"], json!({"stdout": "ok", "stderr": ""}));
+        assert_eq!(fwd(&prepare(raw, "", "", "", false, no_pid).unwrap())["tool_response"], json!({"stdout": "ok", "stderr": ""}));
     }
 
     #[test]
     fn command_output_keeps_its_end() {
         let out = format!("{}END", "x".repeat(5_000));
         let raw = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_response": {"stdout": out}}).to_string();
-        let stdout = fwd(&prepare(raw.as_bytes(), "", "", "", no_pid).unwrap())["tool_response"]["stdout"].as_str().unwrap().to_string();
+        let stdout = fwd(&prepare(raw.as_bytes(), "", "", "", false, no_pid).unwrap())["tool_response"]["stdout"].as_str().unwrap().to_string();
         assert!(stdout.ends_with("END"));
         assert_eq!(stdout.chars().count(), MAX_OUTPUT_TAIL + 1);
     }
@@ -185,7 +186,7 @@ mod tests {
             "hook_event_name":"PreToolUse","tool_name":"AskUserQuestion",
             "tool_input":{"questions":[{"question": long}]}
         })).unwrap();
-        let p = prepare(&raw, "", "", "", no_pid).unwrap();
+        let p = prepare(&raw, "", "", "", false, no_pid).unwrap();
         assert_eq!(p.wait, Some(WaitKind::Question));
         assert_eq!(fwd(&p)["sb_wait"], "question");
         let forwarded = fwd(&p)["tool_input"]["questions"][0]["question"].as_str().unwrap().to_string();
@@ -199,28 +200,38 @@ mod tests {
             "hook_event_name":"PreToolUse","tool_name":"ExitPlanMode",
             "tool_input":{"plan": "p".repeat(10_000), "other": "o".repeat(5_000)}
         })).unwrap();
-        let v = fwd(&prepare(&raw, "", "", "", no_pid).unwrap());
+        let v = fwd(&prepare(&raw, "", "", "", false, no_pid).unwrap());
         assert_eq!(v["tool_input"]["plan"].as_str().unwrap().chars().count(), MAX_PLAN_LEN + 1);
         assert_eq!(v["tool_input"]["other"].as_str().unwrap().chars().count(), MAX_FIELD_LEN + 1);
         let raw = serde_json::to_vec(&json!({"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"plan": "p".repeat(5_000)}})).unwrap();
-        let v = fwd(&prepare(&raw, "", "", "", no_pid).unwrap());
+        let v = fwd(&prepare(&raw, "", "", "", false, no_pid).unwrap());
         assert_eq!(v["tool_input"]["plan"].as_str().unwrap().chars().count(), MAX_FIELD_LEN + 1, "only ExitPlanMode");
     }
 
     #[test]
+    fn a_plan_is_marked_for_waiting_only_with_the_setting() {
+        let raw = br#"{"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","tool_input":{"plan":"p"}}"#;
+        let off = prepare(raw, "", "", "", false, no_pid).unwrap();
+        assert_eq!((off.wait, fwd(&off)["sb_wait"].is_null()), (None, true));
+        let on = prepare(raw, "", "", "", true, no_pid).unwrap();
+        assert_eq!(on.wait, Some(WaitKind::Permission));
+        assert_eq!(fwd(&on)["sb_wait"], "permission");
+    }
+
+    #[test]
     fn rejects_garbage() {
-        assert!(prepare(b"", "Stop", "", "", no_pid).is_none());
-        assert!(prepare(b"not json", "Stop", "", "", no_pid).is_none());
-        assert!(prepare(b"[1,2]", "Stop", "", "", no_pid).is_none());
+        assert!(prepare(b"", "Stop", "", "", false, no_pid).is_none());
+        assert!(prepare(b"not json", "Stop", "", "", false, no_pid).is_none());
+        assert!(prepare(b"[1,2]", "Stop", "", "", false, no_pid).is_none());
     }
 
     #[test]
     fn claude_pid_on_every_event() {
         for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "SubagentStop", "Notification", "Stop"] {
-            let p = prepare(br#"{"session_id":"s1"}"#, event, "", "", || Some(4242)).unwrap();
+            let p = prepare(br#"{"session_id":"s1"}"#, event, "", "", false, || Some(4242)).unwrap();
             assert_eq!(fwd(&p)["sb_claude_pid"], 4242, "{event}");
         }
-        let p = prepare(br#"{"session_id":"s1"}"#, "PreToolUse", "", "", no_pid).unwrap();
+        let p = prepare(br#"{"session_id":"s1"}"#, "PreToolUse", "", "", false, no_pid).unwrap();
         assert!(fwd(&p).get("sb_claude_pid").is_none(), "no pid, no field");
     }
 

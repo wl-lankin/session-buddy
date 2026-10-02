@@ -12,6 +12,7 @@ mod log;
 mod process;
 mod projects;
 mod settings;
+mod terminal;
 mod tray;
 mod usage_poll;
 mod workers;
@@ -77,6 +78,8 @@ fn apply_store_limits(shared: &Shared) {
     let mut st = shared.hub.store.lock().unwrap();
     st.stale_after_ms = s.stale_minutes.max(1) as i64 * 60_000;
     st.remove_after_ms = s.remove_minutes.max(1) as i64 * 60_000;
+    drop(st);
+    shared.hub.set_plan_from_island(s.plan_from_island);
 }
 
 #[tauri::command]
@@ -164,6 +167,13 @@ fn ack(shared: State<Shared>, request_id: String) {
 fn answer(shared: State<Shared>, request_id: String, answer: Value) -> Result<(), String> {
     log::line(format!("answer id={request_id}"));
     shared.hub.answer(&request_id, &answer)
+}
+
+/// Brings the terminal app of a session to the front (macOS; the app comes from a fixed table).
+#[tauri::command]
+async fn focus_terminal(shared: State<'_, Shared>, session_id: String) -> Result<(), String> {
+    let term = shared.hub.store.lock().unwrap().get(&session_id).and_then(|s| s.term_program.clone());
+    terminal::focus(term).await
 }
 
 #[tauri::command]
@@ -477,7 +487,7 @@ pub fn run() {
         .manage(chat::Chat::default())
         .manage(control)
         .invoke_handler(tauri::generate_handler![
-            boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release,
+            boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release, focus_terminal,
             install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app, chat::chat_send, chat::chat_wake, chat::chat_interrupt,
             chat::chat_reset, chat::chat_status, chat::chat_models, worker_send, session_message_send, session_message_cancel, worker_stop, worker_attach, pick_folder
         ])

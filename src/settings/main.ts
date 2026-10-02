@@ -18,7 +18,7 @@ const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "
 // &ollama=down|empty picks the fake Ollama server's answer for the Test button.
 // &roots=2 lists two project folders in the Control block.
 const DEMO_ROOTS = new URLSearchParams(location.search).get("roots") === "2" ? ["/Users/alex/Projects", "/Users/alex/Work/client-sites"] : [];
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.8" };
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.9" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,
@@ -414,6 +414,7 @@ async function main() {
         row("Card shrinks to the strip after", numberInput(() => settings.compactInterval, (v) => (settings.compactInterval = v), 0, 120, 1, true, secondsLabel)),
         row("When a session finishes", finish, "the sound plays in every mode while sounds are on"),
         row("Show the card for turns longer than", numberInput(() => settings.finishMinSeconds, (v) => (settings.finishMinSeconds = v), 0, 3600), "seconds; shorter ones only get the sound"),
+        row("Answer plans from the island", toggle(() => settings.planFromIsland, (v) => { settings.planFromIsland = v; tell({ kind: "plan", on: v }); }), "While its card is open, the terminal's plan dialog waits for you. 'Approve in terminal' hands it over."),
         row("Screen", screen),
       ),
       chatSection(),

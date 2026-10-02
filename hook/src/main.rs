@@ -40,6 +40,15 @@ fn muted(var: Option<std::ffi::OsString>) -> bool {
     var.is_some_and(|v| !v.is_empty())
 }
 
+/// The app writes its settings next to its config: `planFromIsland` (default on) says whether a plan
+/// is held for the island. Anything unreadable means the default.
+fn plan_wait_from(settings: Option<&[u8]>) -> bool {
+    settings
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+        .and_then(|v| v.get("planFromIsland").and_then(serde_json::Value::as_bool))
+        .unwrap_or(true)
+}
+
 fn hook(arg_event: &str) {
     if muted(std::env::var_os("SB_CHAT")) {
         return;
@@ -47,7 +56,8 @@ fn hook(arg_event: &str) {
     let raw = read_stdin();
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     let term = std::env::var("TERM_PROGRAM").unwrap_or_default();
-    let Some(p) = prepare::prepare(&raw, arg_event, &cwd, &term, process::claude_pid) else { return };
+    let plan_wait = plan_wait_from(std::fs::read(sb_common::config_dir().join("settings.json")).ok().as_deref());
+    let Some(p) = prepare::prepare(&raw, arg_event, &cwd, &term, plan_wait, process::claude_pid) else { return };
     let budget = p.wait.map(|k| k.budget()).unwrap_or(FIRE_AND_FORGET_BUDGET);
     let answer = send_within(p.line.clone(), p.wait.is_some(), budget);
     if let (Some(kind), Some(answer)) = (p.wait, answer) {
@@ -118,7 +128,17 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::muted;
+    use super::{muted, plan_wait_from};
+
+    #[test]
+    fn the_plan_wait_follows_the_apps_settings_file() {
+        assert!(plan_wait_from(None));
+        assert!(plan_wait_from(Some(b"not json")));
+        assert!(plan_wait_from(Some(br#"{"soundEnabled":false}"#)));
+        assert!(plan_wait_from(Some(br#"{"planFromIsland":true}"#)));
+        assert!(!plan_wait_from(Some(br#"{"planFromIsland":false}"#)));
+        assert!(plan_wait_from(Some(br#"{"planFromIsland":"no"}"#)));
+    }
 
     #[test]
     fn sb_chat_mutes_the_hook() {

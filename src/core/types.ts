@@ -36,7 +36,9 @@ export interface Question { question: string; header?: string; options: Question
 export type Interaction =
   | { kind: "approval"; requestId: string; tool: string; target: string; agentId: string | null; deadline: number }
   | { kind: "question"; requestId: string; questions: Question[]; deadline: number }
-  | { kind: "reply"; requestId: string; message: string; deadline: number };
+  | { kind: "reply"; requestId: string; message: string; deadline: number }
+  /** A plan from plan mode (ExitPlanMode): answered with `{ feedback }` (rejects it) or `{ terminal: true }` (the terminal's own dialog takes over). */
+  | { kind: "plan"; requestId: string; plan: string; deadline: number };
 
 export type MessageState = "queued" | "delivered" | "cancelled" | "expired";
 

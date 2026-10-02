@@ -47,6 +47,8 @@ pub struct Settings {
     pub chat_max_workers: u32,
     /// Where started sessions run: "background", later "terminal", "iterm", "warp", "wt".
     pub chat_session_host: String,
+    /// A plan from plan mode can be rejected with feedback on the island; off keeps it read-only.
+    pub plan_from_island: bool,
 }
 
 pub const MAX_WORKERS: u32 = 6;
@@ -97,6 +99,7 @@ impl Default for Settings {
             chat_project_roots: Vec::new(),
             chat_max_workers: 3,
             chat_session_host: "background".into(),
+            plan_from_island: true,
         }
     }
 }
@@ -163,6 +166,16 @@ mod tests {
         assert_eq!(v["chatProjectRoots"], serde_json::json!([]));
         assert_eq!(v["chatMaxWorkers"], 3);
         assert_eq!(v["chatSessionHost"], "background");
+    }
+
+    #[test]
+    fn older_files_get_plan_from_island_on() {
+        let s: Settings = serde_json::from_str(r#"{"soundEnabled": false}"#).unwrap();
+        assert!(s.plan_from_island);
+        let off: Settings = serde_json::from_str(r#"{"planFromIsland": false}"#).unwrap();
+        assert!(!off.plan_from_island);
+        assert_eq!(serde_json::to_value(Settings::default()).unwrap()["planFromIsland"], true);
+        assert_eq!(serde_json::to_value(off).unwrap()["planFromIsland"], false);
     }
 
     #[test]

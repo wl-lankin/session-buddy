@@ -1,12 +1,12 @@
 // "Plan ready": Claude Code waits for its own plan dialog in the terminal (the
 // hook cannot answer it), so the island shows the plan read-only and says where
-// to choose. Lower priority than real interactions, never pinned.
+// to choose (this is what shows when plans cannot be answered from the island). Lower priority than real interactions, never pinned.
 
 import { h } from "./dom";
 import { State } from "../core/state";
 import { planSession } from "../model/plan";
 import { renderMarkdown } from "./markdown";
-import { keyed, sessionName, statusDot } from "./parts";
+import { btn, keyed, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 export function buildPlan(actions: ViewActions): ViewHost {
@@ -22,6 +22,9 @@ export function buildPlan(actions: ViewActions): ViewHost {
     { class: "p-foot" },
     h("span", { class: "p-hint", text: "Choose in the terminal: auto-accept edits / approve edits manually / keep planning" }),
     h("button", { class: "p-link", text: "Show session", onclick: open }),
+    btn("Open terminal", "secondary", () => {
+      if (shownId) actions.focusTerminal(shownId);
+    }),
   );
   const el = h("div", { class: "view plan-view" }, head, body, hint);
 

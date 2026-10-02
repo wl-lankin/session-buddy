@@ -5,6 +5,8 @@
 use serde_json::{json, Value};
 use std::time::Duration;
 
+const MAX_FEEDBACK: usize = 2_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitKind {
     Permission,
@@ -37,9 +39,10 @@ impl WaitKind {
 
 /// The cases where the app answers: a human on the island (permission, question, reply), or at once
 /// with a queued message (tool events and Stop of the main session). Everything else is fire-and-forget.
-pub fn wait_kind(payload: &Value) -> Option<WaitKind> {
+/// `plan_wait`: the app wants the main session's plan (ExitPlanMode) held for an answer from the island.
+pub fn wait_kind(payload: &Value, plan_wait: bool) -> Option<WaitKind> {
     let event = payload.get("hook_event_name")?.as_str()?;
-    human_wait(event, payload).or_else(|| message_wait(event, payload))
+    human_wait(event, payload, plan_wait).or_else(|| message_wait(event, payload))
 }
 
 /// A subagent's events never carry the user's message: it is for the main session.
@@ -48,10 +51,14 @@ fn message_wait(event: &str, payload: &Value) -> Option<WaitKind> {
     (main && matches!(event, "PreToolUse" | "PostToolUse" | "Stop")).then_some(WaitKind::Message)
 }
 
-fn human_wait(event: &str, payload: &Value) -> Option<WaitKind> {
+fn human_wait(event: &str, payload: &Value, plan_wait: bool) -> Option<WaitKind> {
     match event {
-        // Claude Code ignores a hook "allow" for ExitPlanMode and shows its own plan dialog anyway.
-        "PermissionRequest" if payload.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") => None,
+        // Claude Code ignores a hook "allow" for ExitPlanMode and shows its own plan dialog anyway: the
+        // island can only reject with feedback, and printing nothing leaves the dialog to the terminal.
+        "PermissionRequest" if payload.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") => {
+            let main = payload.get("agent_id").and_then(Value::as_str).is_none_or(str::is_empty);
+            (plan_wait && main).then_some(WaitKind::Permission)
+        }
         "PermissionRequest" => Some(WaitKind::Permission),
         "PreToolUse" if payload.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion") => {
             Some(WaitKind::Question)
@@ -68,17 +75,40 @@ fn human_wait(event: &str, payload: &Value) -> Option<WaitKind> {
     }
 }
 
+/// Text for the model: control characters other than line breaks and tabs dropped, then trimmed and clipped.
+fn clean(text: &str, max: usize) -> String {
+    let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
+    kept.trim().chars().take(max).collect::<String>().trim_end().to_string()
+}
+
 /// Claude Code's documented hook output for each kind, or None to stay silent.
 pub fn hook_output(kind: WaitKind, original: &Value, answer: &Value) -> Option<String> {
     match kind {
         WaitKind::Permission => {
-            let decision = match answer.get("behavior")?.as_str()? {
-                "allow" => json!({"behavior": "allow"}),
-                "deny" => json!({"behavior": "deny", "message": "Denied from Session Buddy"}),
-                _ => return None,
+            let plan = original.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode");
+            let message = if plan {
+                // Never an allow: Claude Code would ignore it, and the terminal dialog is where a plan is approved.
+                let feedback = clean(answer.get("feedback")?.as_str()?, MAX_FEEDBACK);
+                if feedback.is_empty() {
+                    return None;
+                }
+                format!("The user wants changes to the plan: {feedback}")
+            } else {
+                match answer.get("behavior")?.as_str()? {
+                    "allow" => {
+                        return Some(
+                            json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}})
+                                .to_string(),
+                        )
+                    }
+                    "deny" => Some(clean(answer.get("message").and_then(Value::as_str).unwrap_or_default(), MAX_FEEDBACK))
+                        .filter(|m| !m.is_empty())
+                        .unwrap_or_else(|| "Denied from Session Buddy".into()),
+                    _ => return None,
+                }
             };
             Some(
-                json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
+                json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": message}}})
                     .to_string(),
             )
         }
@@ -146,54 +176,116 @@ mod tests {
 
     #[test]
     fn classifies_blocking_events() {
-        assert_eq!(wait_kind(&json!({"hook_event_name":"PermissionRequest"})), Some(WaitKind::Permission));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"PermissionRequest"}), false), Some(WaitKind::Permission));
         assert_eq!(
-            wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"})),
+            wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}), false),
             Some(WaitKind::Question)
         );
-        assert_eq!(wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"Bash"})), Some(WaitKind::Message));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"Bash"}), false), Some(WaitKind::Message));
         assert_eq!(
-            wait_kind(&json!({"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Shall I push it?"})),
+            wait_kind(&json!({"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Shall I push it?"}), false),
             Some(WaitKind::Reply)
         );
         // Markdown and whitespace after the question mark still count.
         assert_eq!(
-            wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"**Want me to continue?**\n\n"})),
+            wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"**Want me to continue?**\n\n"}), false),
             Some(WaitKind::Reply)
         );
         // A Stop that is no question, or follows an earlier block, can still carry a queued message.
         assert_eq!(
-            wait_kind(&json!({"hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"Again?"})),
+            wait_kind(&json!({"hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"Again?"}), false),
             Some(WaitKind::Message)
         );
-        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"Done."})), Some(WaitKind::Message));
-        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop"})), Some(WaitKind::Message));
-        assert_eq!(wait_kind(&json!({"hook_event_name":"PostToolUse","tool_name":"Read"})), Some(WaitKind::Message));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"Done."}), false), Some(WaitKind::Message));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop"}), false), Some(WaitKind::Message));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"PostToolUse","tool_name":"Read"}), false), Some(WaitKind::Message));
         for event in ["SessionStart", "UserPromptSubmit", "Notification", "SubagentStop", "PostToolUseFailure"] {
-            assert_eq!(wait_kind(&json!({"hook_event_name": event})), None, "{event}");
+            assert_eq!(wait_kind(&json!({"hook_event_name": event}), false), None, "{event}");
         }
     }
 
     #[test]
     fn a_subagent_event_never_waits_for_a_message() {
         for event in ["PreToolUse", "PostToolUse", "Stop"] {
-            assert_eq!(wait_kind(&json!({"hook_event_name": event, "agent_id": "a1", "tool_name": "Read"})), None, "{event}");
+            assert_eq!(wait_kind(&json!({"hook_event_name": event, "agent_id": "a1", "tool_name": "Read"}), false), None, "{event}");
         }
         // ...but its permission request and its question still reach the user.
         assert_eq!(
-            wait_kind(&json!({"hook_event_name":"PermissionRequest","agent_id":"a1","tool_name":"Bash"})),
+            wait_kind(&json!({"hook_event_name":"PermissionRequest","agent_id":"a1","tool_name":"Bash"}), false),
             Some(WaitKind::Permission)
         );
     }
 
     #[test]
-    fn exit_plan_mode_never_blocks() {
-        // Claude Code ignores a hook "allow" for ExitPlanMode and keeps its own plan dialog.
-        assert_eq!(wait_kind(&json!({"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode"})), None);
+    fn exit_plan_mode_waits_only_when_the_app_wants_it() {
+        let plan = json!({"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode"});
+        assert_eq!(wait_kind(&plan, false), None);
+        assert_eq!(wait_kind(&plan, true), Some(WaitKind::Permission));
+        // A subagent's plan is never held, and the setting changes nothing for other tools.
+        let sub = json!({"hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","agent_id":"a1"});
+        assert_eq!(wait_kind(&sub, true), None);
+        let bash = json!({"hook_event_name":"PermissionRequest","tool_name":"Bash"});
+        assert_eq!(wait_kind(&bash, false), Some(WaitKind::Permission));
+        assert_eq!(wait_kind(&bash, true), Some(WaitKind::Permission));
+        // The read-only plan path (PreToolUse) is untouched.
+        let pre = json!({"hook_event_name":"PreToolUse","tool_name":"ExitPlanMode"});
+        assert_eq!(wait_kind(&pre, true), Some(WaitKind::Message));
+    }
+
+    fn plan_out(answer: Value) -> Option<Value> {
+        hook_output(WaitKind::Permission, &json!({"tool_name":"ExitPlanMode"}), &answer).map(|s| parse(&s))
+    }
+
+    fn deny(message: &str) -> Value {
+        json!({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":message}}})
+    }
+
+    #[test]
+    fn plan_feedback_denies_with_the_text() {
+        assert_eq!(plan_out(json!({"feedback":"  use a queue  "})), Some(deny("The user wants changes to the plan: use a queue")));
         assert_eq!(
-            wait_kind(&json!({"hook_event_name":"PermissionRequest","tool_name":"Bash"})),
-            Some(WaitKind::Permission)
+            plan_out(json!({"feedback":"a\u{7}b\u{1b}[31m\nsecond\tline\r"})),
+            Some(deny("The user wants changes to the plan: ab[31m\nsecond\tline"))
         );
+    }
+
+    #[test]
+    fn plan_feedback_is_clipped_to_2000_chars() {
+        let out = plan_out(json!({"feedback": "\u{e4}".repeat(2_500)})).unwrap();
+        let message = out["hookSpecificOutput"]["decision"]["message"].as_str().unwrap();
+        let prefix = "The user wants changes to the plan: ";
+        assert_eq!(message.chars().count(), prefix.chars().count() + 2_000);
+    }
+
+    #[test]
+    fn a_plan_never_prints_allow_or_anything_unexpected() {
+        for answer in [
+            json!({"terminal": true}),
+            json!({"behavior": "allow"}),
+            json!({"behavior": "deny"}),
+            json!({"allow": true}),
+            json!({"feedback": ""}),
+            json!({"feedback": " \u{7}\n "}),
+            json!({"feedback": 5}),
+            json!({"reply": "yes"}),
+            json!({}),
+            json!("feedback"),
+        ] {
+            assert!(plan_out(answer.clone()).is_none(), "{answer}");
+        }
+    }
+
+    #[test]
+    fn deny_carries_a_message_only_when_given() {
+        let out = |answer: Value| hook_output(WaitKind::Permission, &json!({"tool_name":"Bash"}), &answer).map(|s| parse(&s));
+        assert_eq!(out(json!({"behavior":"deny","message":"  not now\u{7} "})), Some(deny("not now")));
+        assert_eq!(out(json!({"behavior":"deny","message":""})), Some(deny("Denied from Session Buddy")));
+        assert_eq!(out(json!({"behavior":"deny","message":7})), Some(deny("Denied from Session Buddy")));
+        let long = out(json!({"behavior":"deny","message":"x".repeat(3_000)})).unwrap();
+        assert_eq!(long["hookSpecificOutput"]["decision"]["message"].as_str().unwrap().chars().count(), 2_000);
+        // A feedback answer means nothing for an ordinary permission.
+        assert!(out(json!({"feedback":"x"})).is_none());
+        assert!(out(json!({"terminal":true})).is_none());
     }
 
     #[test]

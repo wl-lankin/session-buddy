@@ -327,6 +327,7 @@ function pendingLine(s: Session): string | null {
   if (!p) return null;
   if (p.kind === "approval") return `permission for ${clip(p.target, CONTEXT_LIMITS.pending)}`;
   if (p.kind === "question") return `question: ${clip(p.questions[0]?.question ?? "", CONTEXT_LIMITS.pending)}`;
+  if (p.kind === "plan") return `plan waiting for approval: ${clip(p.plan, CONTEXT_LIMITS.pending)}`;
   return `asked: ${clip(p.message, CONTEXT_LIMITS.pending)}`;
 }
 

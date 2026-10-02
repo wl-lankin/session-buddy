@@ -260,4 +260,14 @@ describe("viewmodel", () => {
     expect(extraView({ ...off, disabledReason: "plan_not_eligible" })).toEqual({ on: false, reason: "plan not eligible" });
     expect(extraView(off)).toEqual({ on: false, reason: null });
   });
+
+  it("plan interactions queue like any other: the shown card stays first, Buddy shows the approval state", () => {
+    const plan = (id: string): Interaction => ({ kind: "plan", requestId: id, plan: "## P", deadline: 0 });
+    const a = mk({ status: "needs_you", pending: [approval("r1")] });
+    const b = mk({ status: "needs_you", pending: [plan("r2")] });
+    expect(pendingQueue([a, b], a.id).map((q) => q.item.requestId)).toEqual(["r1", "r2"]);
+    expect(pendingQueue([a, b], a.id, "r2").map((q) => q.item.requestId)).toEqual(["r2", "r1"]);
+    expect(botStateFor(b)).toBe("approval");
+    expect(currentActivity(b)).toBe("Plan waits for you: ## P");
+  });
 });

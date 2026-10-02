@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -71,6 +71,7 @@ pub struct Hub {
     actions: Mutex<Vec<ActionRequest>>,
     tools: OnceLock<ToolHandler>,
     counter: AtomicU64,
+    plan_from_island: AtomicBool,
     notify: Notify,
     ack_timeout: Duration,
     wait_permission: Duration,
@@ -94,11 +95,17 @@ impl Hub {
             actions: Mutex::new(Vec::new()),
             tools: OnceLock::new(),
             counter: AtomicU64::new(1),
+            plan_from_island: AtomicBool::new(true),
             notify: Box::new(notify),
             ack_timeout,
             wait_permission,
             wait_long,
         })
+    }
+
+    /// Whether a plan (ExitPlanMode) from the main session is held for an answer from the island.
+    pub fn set_plan_from_island(&self, on: bool) {
+        self.plan_from_island.store(on, Ordering::Relaxed);
     }
 
     pub fn set_tool_handler(&self, handler: ToolHandler) {
@@ -177,10 +184,12 @@ impl Hub {
             return;
         }
 
-        // Claude Code ignores a hook answer for ExitPlanMode, so never hold an old relay that still waits:
-        // closing without an ack hands the dialog back to the terminal.
+        // An allow is ignored for ExitPlanMode, so only the main session's plan is held, and only with the
+        // setting on: closing without an ack hands the terminal's own dialog back at once.
         let plan_mode = payload.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode");
-        let wait = payload.get("sb_wait").and_then(Value::as_str).filter(|_| !plan_mode).map(str::to_string);
+        let main = payload.get("agent_id").and_then(Value::as_str).is_none_or(str::is_empty);
+        let hold_plan = main && self.plan_from_island.load(Ordering::Relaxed);
+        let wait = payload.get("sb_wait").and_then(Value::as_str).filter(|_| !plan_mode || hold_plan).map(str::to_string);
         let Some(kind) = wait else {
             let cues = self.store.lock().unwrap().apply_hook(&payload, now_ms());
             (self.notify)(cues);
@@ -203,7 +212,8 @@ impl Hub {
 
         let mut guard = PendingGuard { hub: &self, id, answered: false };
         let outcome = self.wait(&mut rx, budget, &mut rd, &mut wr).await;
-        guard.answered = outcome.is_some();
+        // "Approve in terminal" is a release that still tells the relay: the plan stays for the terminal's dialog.
+        guard.answered = outcome.as_deref().and_then(|a| serde_json::from_str::<Value>(a).ok()).is_some_and(|a| a.get("terminal").is_none());
         drop(guard);
 
         if let Some(line) = outcome {
@@ -282,6 +292,11 @@ impl Hub {
     }
 
     pub fn answer(&self, request_id: &str, answer: &Value) -> Result<(), String> {
+        // The store may have dropped the card already (the turn went on in the terminal).
+        let open = self.store.lock().unwrap().has_pending(request_id) || self.actions.lock().unwrap().iter().any(|a| a.request_id == request_id);
+        if !open {
+            return Err(ALREADY_ANSWERED.into());
+        }
         let behavior_ok = matches!(answer.get("behavior").and_then(Value::as_str), Some("allow" | "deny"));
         let answers_ok = answer
             .get("answers")
@@ -290,7 +305,9 @@ impl Hub {
             .unwrap_or(false);
         let reply_ok = answer.get("reply").and_then(Value::as_str).map(|t| !t.trim().is_empty()).unwrap_or(false);
         let allow_ok = answer.get("allow").is_some_and(Value::is_boolean);
-        if !(behavior_ok || answers_ok || reply_ok || allow_ok) {
+        let feedback_ok = answer.get("feedback").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty());
+        let terminal_ok = answer.get("terminal").and_then(Value::as_bool) == Some(true);
+        if !(behavior_ok || answers_ok || reply_ok || allow_ok || feedback_ok || terminal_ok) {
             return Err("invalid answer".into());
         }
         self.send(request_id, Reply::Answer(answer.to_string()))
@@ -379,17 +396,138 @@ mod tests {
         json!({"sb_kind":"hook","sb_wait":"permission","hook_event_name":"PermissionRequest","session_id":session,"cwd":"/p/x","tool_name":"Bash","tool_input":{"command":"ls"}})
     }
 
+    fn plan(session: &str, wait: Value) -> Value {
+        json!({"sb_kind":"hook","sb_wait":wait,"hook_event_name":"PermissionRequest","session_id":session,"cwd":"/p/x","tool_name":"ExitPlanMode","tool_input":{"plan":"## Plan"}})
+    }
+
     #[tokio::test]
-    async fn exit_plan_mode_from_an_old_relay_never_blocks() {
+    async fn a_plan_is_not_held_with_the_setting_off_or_without_a_wait() {
+        for (on, wait) in [(false, json!("permission")), (true, Value::Null)] {
+            let h = hub();
+            h.set_plan_from_island(on);
+            let (task, client) = send(&h, plan("s1", wait)).await;
+            // Closed at once without an ack: the terminal's own dialog takes over.
+            tokio::time::timeout(Duration::from_millis(300), task).await.expect("serve returns at once").unwrap();
+            assert!(read_lines(client).await.is_empty());
+            assert!(pending_id(&h).is_none());
+            assert!(h.pending.lock().unwrap().is_empty());
+            assert_eq!(h.store.lock().unwrap().get("s1").unwrap().plan.as_deref(), Some("## Plan"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_subagents_plan_is_never_held() {
         let h = hub();
-        let payload = json!({"sb_kind":"hook","sb_wait":"permission","hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/p/x","tool_name":"ExitPlanMode","tool_input":{"plan":"## Plan"}});
-        let (task, client) = send(&h, payload).await;
-        // The hub closes at once without an ack: the old relay hands the dialog back to the terminal.
+        let mut p = plan("s1", json!("permission"));
+        p["agent_id"] = json!("a1");
+        let (task, client) = send(&h, p).await;
         tokio::time::timeout(Duration::from_millis(300), task).await.expect("serve returns at once").unwrap();
         assert!(read_lines(client).await.is_empty());
         assert!(pending_id(&h).is_none());
-        assert!(h.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_held_plan_is_pending_and_feedback_reaches_the_relay() {
+        let h = hub();
+        let (task, client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        {
+            let st = h.store.lock().unwrap();
+            let s = st.get("s1").unwrap();
+            assert_eq!(s.status, crate::store::Status::NeedsYou);
+            assert!(matches!(&s.pending[0], crate::store::Interaction::Plan { plan, deadline, .. } if plan == "## Plan" && *deadline > now_ms()));
+        }
+        h.ack(&id);
+        h.answer(&id, &json!({"feedback":"use a queue"})).unwrap();
+        assert_eq!(read_lines(client).await, vec![ACK.to_string(), r#"{"feedback":"use a queue"}"#.to_string()]);
+        task.await.unwrap();
+        let st = h.store.lock().unwrap();
+        let s = st.get("s1").unwrap();
+        assert!(s.pending.is_empty());
+        assert_eq!(s.plan, None);
+        assert_ne!(s.status, crate::store::Status::NeedsYou);
+    }
+
+    #[tokio::test]
+    async fn the_terminal_answer_reaches_the_relay_and_keeps_the_plan() {
+        let h = hub();
+        let (task, client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        h.answer(&id, &json!({"terminal":true})).unwrap();
+        assert_eq!(read_lines(client).await, vec![ACK.to_string(), r#"{"terminal":true}"#.to_string()]);
+        task.await.unwrap();
         assert_eq!(h.store.lock().unwrap().get("s1").unwrap().plan.as_deref(), Some("## Plan"));
+    }
+
+    #[tokio::test]
+    async fn a_released_plan_prints_nothing_and_keeps_the_plan() {
+        let h = hub();
+        let (task, client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        h.release(&id);
+        let lines = tokio::time::timeout(Duration::from_millis(300), read_lines(client)).await.expect("released at once");
+        assert_eq!(lines, vec![ACK.to_string()]);
+        task.await.unwrap();
+        let st = h.store.lock().unwrap();
+        assert!(st.get("s1").unwrap().pending.is_empty());
+        assert_eq!(st.get("s1").unwrap().plan.as_deref(), Some("## Plan"));
+    }
+
+    #[tokio::test]
+    async fn a_plan_times_out_to_the_terminal_and_a_late_answer_fails() {
+        let h = hub();
+        let (task, client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        assert_eq!(read_lines(client).await, vec![ACK.to_string()]);
+        task.await.unwrap();
+        assert!(h.answer(&id, &json!({"feedback":"late"})).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_closed_connection_drops_the_plan_card() {
+        let h = hub();
+        let (task, client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        drop(client);
+        tokio::time::timeout(Duration::from_millis(200), task).await.expect("released promptly").unwrap();
+        assert!(pending_id(&h).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_plan_card_the_turn_outlived_cannot_be_answered() {
+        let h = hub();
+        let (_task, _client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        h.store.lock().unwrap().apply_hook(&json!({"hook_event_name":"PostToolUse","session_id":"s1","tool_name":"ExitPlanMode"}), now_ms());
+        assert!(h.answer(&id, &json!({"feedback":"too late"})).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_session_that_ends_takes_its_plan_card_along() {
+        let h = hub();
+        let (task, client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        h.ack(&id);
+        h.store.lock().unwrap().apply_hook(&json!({"hook_event_name":"SessionEnd","session_id":"s1"}), now_ms());
+        assert!(h.answer(&id, &json!({"feedback":"x"})).is_err());
+        assert_eq!(read_lines(client).await, vec![ACK.to_string()]);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn plan_answers_need_text_or_the_terminal_flag() {
+        let h = hub();
+        let (_task, _client) = send(&h, plan("s1", json!("permission"))).await;
+        let id = wait_for_pending(&h).await;
+        assert!(h.answer(&id, &json!({"feedback":"  "})).is_err());
+        assert!(h.answer(&id, &json!({"terminal":false})).is_err());
+        assert!(h.answer(&id, &json!({"terminal":"yes"})).is_err());
+        assert!(h.answer(&id, &json!({"terminal":true})).is_ok());
     }
 
     #[tokio::test]

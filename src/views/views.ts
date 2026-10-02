@@ -50,6 +50,8 @@ export interface ViewActions {
   togglePin(): void;
   answer(requestId: string, answer: unknown): void;
   release(requestId: string): void;
+  /** Brings the session's terminal app to the front; a failure shows as the island's short notice. */
+  focusTerminal(sessionId: string): void;
   openSettings(): void;
   /** Ask the OS for keyboard focus (hotkey, reply box) or give it back. */
   wantKeyboard(on: boolean): void;

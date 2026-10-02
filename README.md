@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.8](https://img.shields.io/badge/version-1.0.8-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.9](https://img.shields.io/badge/version-1.0.9-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
@@ -16,7 +16,7 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 - **Sub-agents and background tasks** of each session, live.
 - **What a step did**: click an Edit or Write step for its diff, a command for its full text and the end of its output.
 - **Answer from the island**: Allow / Deny permission requests, pick `AskUserQuestion` options, reply to a turn that ends in a question.
-- **Plans** from plan mode, shown read-only while Claude Code waits in its own terminal dialog.
+- **Plans** from plan mode: read the plan on the island and send feedback ("Tell Claude what to change") without switching to the terminal. Approving stays in the terminal's own dialog (Claude Code does not let a hook approve a plan), and "Approve in terminal" brings that terminal to the front.
 - **Finished sessions** show a short card with how long the turn took and how Claude's last message starts.
 - **5-hour and 7-day limits** with reset times, per-model weekly limits (for example "7D Fable"), extra usage and the logged-in account.
 - **Never in the way**: Claude Code is never blocked, even when the app is closed.
@@ -44,8 +44,8 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/session-buddy/releases/latest)**:
 
-- **Windows**: `Session Buddy_1.0.8_x64-setup.exe`. Installs for the current user, no admin needed.
-- **macOS**: `Session Buddy_1.0.8_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
+- **Windows**: `Session Buddy_1.0.9_x64-setup.exe`. Installs for the current user, no admin needed.
+- **macOS**: `Session Buddy_1.0.9_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
 The builds are not code-signed yet, so the first start needs one extra click:
 
@@ -63,7 +63,7 @@ npm install
 npm run pack
 ```
 
-- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.8_x64-setup.exe`.
+- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.9_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
 On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.

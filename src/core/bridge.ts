@@ -95,6 +95,8 @@ export const Bridge = {
   /** Resolves to an error message, or null when the text was queued (or, for a managed session, sent directly). */
   sessionMessageSend: (sessionId: string, text: string) => errorCall("session_message_send", { sessionId, text }),
   sessionMessageCancel: (sessionId: string, messageId: string) => errorCall("session_message_cancel", { sessionId, messageId }),
+  /** Brings the session's terminal app to the front (macOS). Resolves to an error message, or null. */
+  focusTerminal: (sessionId: string) => errorCall("focus_terminal", { sessionId }),
   workerStop: (sessionId: string) => errorCall("worker_stop", { sessionId }),
   chatSend: (text: string) => attempt<void>("chat_send", { text }),
   chatWake: () => call<void>("chat_wake"),

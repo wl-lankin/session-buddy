@@ -10,6 +10,7 @@ import type { ActionRequest, Interaction, Session } from "../core/types";
 import { actionKey, buildAnswer, combinedQueue, folderOptions, hostChoice, hostLabel, initialDraft, visibleRows, withFolder, withHost, type ActionDraft, type QueueEntry } from "../model/actions";
 import { fmtCountdown } from "../model/format";
 import { answersFor, pendingQueue } from "../model/viewmodel";
+import { TERMINAL_ANSWER, feedbackAnswer, FEEDBACK_MAX, sendsFeedback } from "../model/plan";
 import { createSubmitGuard } from "../model/submitguard";
 import { btn, enlargeButton, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
@@ -19,6 +20,7 @@ const KIND_LABEL: Record<Interaction["kind"], string> = {
   approval: "Permission",
   question: "Question",
   reply: "Claude asks",
+  plan: "Plan",
 };
 
 /** Clicks this soon after the card changed were aimed at the previous card. */
@@ -35,7 +37,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   const notice = h("div", { class: "i-notice" });
   const countdown = h("span", { class: "i-countdown" });
   const foot = h("div", { class: "i-foot" });
-  const el = h("div", { class: "view interaction-view" }, head, body, notice, foot);
+  const tail = h("div", { class: "i-tail", style: "display:none" });
+  const el = h("div", { class: "view interaction-view" }, head, body, notice, foot, tail);
   const enlarge = enlargeButton(() => actions.toggleEnlarge());
   let replyBox: HTMLTextAreaElement | null = null;
 
@@ -48,6 +51,8 @@ export function buildInteraction(actions: ViewActions): ViewHost {
   let picks: Record<string, string[]> = {};
   let other: Record<string, string> = {};
   let submit: HTMLButtonElement | null = null;
+  // Whether the card's answer is complete; null on cards without a submit button.
+  let ready: (() => boolean) | null = null;
   // Only the answering actions lock; "Answer in terminal" and the text fields stay usable.
   const guard = createSubmitGuard<typeof State.notice>((locked) => {
     el.querySelectorAll<HTMLButtonElement>(".btn.primary, .btn.danger, .opt, .i-fopt").forEach((c) => (c.disabled = locked));
@@ -65,13 +70,14 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     window.setTimeout(() => field.focus(), 120);
   };
 
-  const terminalBtn = (requestId: string) => btn("Answer in terminal", "secondary", () => {
-      if (settled()) actions.release(requestId);
+  const terminalBtn = (requestId: string, sessionId: string) => btn("Answer in terminal", "secondary", () => {
+      if (!settled()) return;
+      actions.release(requestId);
+      actions.focusTerminal(sessionId);
     });
 
   function refreshSubmit() {
-    if (!submit || current?.kind !== "session" || current.item.kind !== "question") return;
-    submit.disabled = guard.locked || answersFor(current.item.questions, picks, other) == null;
+    if (submit && ready) submit.disabled = guard.locked || !ready();
   }
 
   function renderApproval(session: Session, item: Extract<Interaction, { kind: "approval" }>) {
@@ -86,13 +92,13 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     foot.replaceChildren(
       countdown,
       h("span", { class: "grow" }),
-      terminalBtn(item.requestId),
+      terminalBtn(item.requestId, session.id),
       btn("Deny", "danger", () => answer(item.requestId, { behavior: "deny" })),
       btn("Allow", "primary", () => answer(item.requestId, { behavior: "allow" })),
     );
   }
 
-  function renderQuestion(item: Extract<Interaction, { kind: "question" }>) {
+  function renderQuestion(session: Session, item: Extract<Interaction, { kind: "question" }>) {
     const blocks = item.questions.map((q) => {
       const opts = h("div", { class: "i-options" });
       const otherInput = h("input", { class: "i-other", placeholder: "Other..." });
@@ -150,11 +156,12 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       const answers = answersFor(item.questions, picks, other);
       if (answers) answer(item.requestId, { answers });
     });
-    foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), submit);
+    ready = () => answersFor(item.questions, picks, other) != null;
+    foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId, session.id), submit);
     refreshSubmit();
   }
 
-  function renderReply(item: Extract<Interaction, { kind: "reply" }>) {
+  function renderReply(session: Session, item: Extract<Interaction, { kind: "reply" }>) {
     const box = h("textarea", { class: "i-reply", rows: REPLY_ROWS, placeholder: "Reply to Claude (Enter sends, Shift+Enter adds a line)" });
     replyBox = box;
     const send = () => {
@@ -171,7 +178,39 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     });
     // Claude writes Markdown: **bold**, `code`, lists and code blocks read better rendered.
     body.replaceChildren(h("div", { class: "i-message scrollable" }, ...renderMarkdown(item.message)), box);
-    foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), btn("Send", "primary", send));
+    foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId, session.id), btn("Send", "primary", send));
+  }
+
+  function renderPlan(session: Session, item: Extract<Interaction, { kind: "plan" }>) {
+    const box = h("textarea", { class: "i-reply", rows: REPLY_ROWS, placeholder: "Tell Claude what to change (Cmd/Ctrl+Enter sends)" });
+    box.maxLength = FEEDBACK_MAX;
+    replyBox = box;
+    const send = () => {
+      const feedback = feedbackAnswer(box.value);
+      if (feedback) answer(item.requestId, feedback);
+    };
+    box.addEventListener("mousedown", () => focusField(box));
+    box.addEventListener("input", () => {
+      box.classList.toggle("overflowing", box.scrollHeight > box.clientHeight + 1);
+      refreshSubmit();
+    });
+    box.addEventListener("keydown", (e) => {
+      if (sendsFeedback(e)) {
+        e.preventDefault();
+        send();
+      }
+    });
+    body.replaceChildren(h("div", { class: "i-message i-plan scrollable" }, ...renderMarkdown(item.plan)), box);
+    submit = btn("Send feedback", "primary", send);
+    ready = () => feedbackAnswer(box.value) != null;
+    const handOver = btn("Approve in terminal", "secondary", () => {
+      if (!settled() || !guard.lock(State.notice)) return;
+      actions.answer(item.requestId, TERMINAL_ANSWER);
+      actions.focusTerminal(session.id);
+    });
+    foot.replaceChildren(countdown, h("span", { class: "grow" }), handOver, submit);
+    tail.replaceChildren(h("div", { class: "i-hint", text: "Claude Code asks for approval in the terminal; sending feedback keeps planning." }));
+    refreshSubmit();
   }
 
   function renderAction(a: ActionRequest) {
@@ -260,7 +299,9 @@ export function buildInteraction(actions: ViewActions): ViewHost {
           head.replaceChildren();
           body.replaceChildren();
           foot.replaceChildren();
+          tail.replaceChildren();
         }
+        tail.style.display = "none";
         return;
       }
       const entry = current;
@@ -285,12 +326,16 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       picks = {};
       other = {};
       submit = null;
+      ready = null;
       replyBox = null;
+      tail.replaceChildren();
       choosing = false;
       if (entry.kind === "action") renderAction(entry.action);
       else if (entry.item.kind === "approval") renderApproval(entry.session, entry.item);
-      else if (entry.item.kind === "question") renderQuestion(entry.item);
-      else renderReply(entry.item);
+      else if (entry.item.kind === "question") renderQuestion(entry.session, entry.item);
+      else if (entry.item.kind === "plan") renderPlan(entry.session, entry.item);
+      else renderReply(entry.session, entry.item);
+      tail.style.display = tail.hasChildNodes() ? "" : "none";
       actions.relayout();
     },
     anchorId: () => shownId || null,
@@ -306,7 +351,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
         c.classList.contains("i-reply") ? c.offsetHeight + parseFloat(getComputedStyle(c).marginTop) : c.scrollHeight + c.offsetHeight - c.clientHeight;
       const bodyKids = [...body.children] as HTMLElement[];
       const bodyH = bodyKids.reduce((sum, c) => sum + natural(c), 0) + Math.max(0, bodyKids.length - 1) * 6;
-      const rows = [head.offsetHeight, bodyH, notice.style.display === "none" ? 0 : notice.offsetHeight, foot.offsetHeight].filter((x) => x > 0);
+      const rows = [head.offsetHeight, bodyH, notice.style.display === "none" ? 0 : notice.offsetHeight, foot.offsetHeight, tail.style.display === "none" ? 0 : tail.offsetHeight].filter((x) => x > 0);
       const cs = getComputedStyle(el);
       const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
       return rows.reduce((a, b) => a + b, 0) + Math.max(0, rows.length - 1) * 8 + pad + 22;
@@ -316,6 +361,14 @@ export function buildInteraction(actions: ViewActions): ViewHost {
         if (actionKey(e.key, (e.target as Element | null)?.tagName ?? "") !== "deny") return false;
         e.preventDefault();
         (foot.querySelector<HTMLButtonElement>(".btn.danger"))?.click();
+        return true;
+      }
+      if (current?.kind === "session" && current.item.kind === "plan") {
+        // Escape only leaves the textarea; it never answers and never closes the island from there.
+        const field = (e.target as Element | null)?.closest("textarea");
+        if (e.key !== "Escape" || !field) return false;
+        (field as HTMLTextAreaElement).blur();
+        actions.wantKeyboard(false);
         return true;
       }
       if (current?.kind !== "session" || current.item.kind !== "question") return false;

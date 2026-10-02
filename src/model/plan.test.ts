@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Interaction, Session } from "../core/types";
-import { newPlan, planSession } from "./plan";
+import { FEEDBACK_MAX, TERMINAL_ANSWER, feedbackAnswer, newPlan, planSession, planViewFor, sendsFeedback } from "./plan";
 
 const sess = (id: string, plan: string | null, pending: Interaction[] = []): Session => ({
   id, project: id, cwd: "", branch: null, termProgram: null, model: null, status: "thinking", statusSince: 0,
@@ -43,5 +43,52 @@ describe("newPlan", () => {
 
   it("a session that appears with a plan counts", () => {
     expect(newPlan([], [sess("x", "p")])).toBe("x");
+  });
+});
+
+const planItem = (id: string): Interaction => ({ kind: "plan", requestId: id, plan: "## P", deadline: 0 });
+
+describe("feedback", () => {
+  it("is empty until there is text", () => {
+    expect(feedbackAnswer("")).toBeNull();
+    expect(feedbackAnswer("  \n ")).toBeNull();
+    expect(feedbackAnswer("  use Redis \n")).toEqual({ feedback: "use Redis" });
+  });
+
+  it("is clipped to 2000 characters", () => {
+    const f = feedbackAnswer("x".repeat(2500))?.feedback ?? "";
+    expect(f).toHaveLength(FEEDBACK_MAX);
+    expect(FEEDBACK_MAX).toBe(2000);
+  });
+
+  it("hand-over answer is the terminal flag", () => {
+    expect(TERMINAL_ANSWER).toEqual({ terminal: true });
+  });
+
+  it("only Cmd/Ctrl+Enter sends", () => {
+    const k = (key: string, metaKey = false, ctrlKey = false) => ({ key, metaKey, ctrlKey });
+    expect(sendsFeedback(k("Enter", true))).toBe(true);
+    expect(sendsFeedback(k("Enter", false, true))).toBe(true);
+    expect(sendsFeedback(k("Enter"))).toBe(false);
+    expect(sendsFeedback(k("Escape", true))).toBe(false);
+  });
+});
+
+describe("planViewFor", () => {
+  it("a pending plan interaction shows the answerable card, even without focus", () => {
+    expect(planViewFor([sess("a", "p", [planItem("r1")]), sess("b", null)], "b")).toBe("interaction");
+  });
+
+  it("only plan text shows the read-only view, for the focused session", () => {
+    expect(planViewFor([sess("a", "p")], "a")).toBe("readonly");
+    expect(planViewFor([sess("a", "p")], null)).toBeNull();
+  });
+
+  it("another interaction hides the read-only view", () => {
+    expect(planViewFor([sess("a", "p"), sess("b", null, [approval])], "a")).toBeNull();
+  });
+
+  it("an empty state shows nothing", () => {
+    expect(planViewFor([sess("a", null)], "a")).toBeNull();
   });
 });

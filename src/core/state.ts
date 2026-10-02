@@ -40,6 +40,8 @@ export interface Settings {
   chatMaxWorkers: number;
   /** Where a started session runs; "background" for now. */
   chatSessionHost: string;
+  /** Plans from plan mode can be answered with feedback in the island; off keeps the read-only plan card. */
+  planFromIsland: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
   chatProjectRoots: [],
   chatMaxWorkers: 3,
   chatSessionHost: "background",
+  planFromIsland: true,
 };
 
 type Listener = () => void;

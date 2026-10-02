@@ -70,6 +70,30 @@ jobs:
           {"bundle": {"resources": {"../target/relay/sb-relay": null, "../target/relay-universal/sb-relay": "sb-relay"}}}
           EOF
 
+      # The release body is the CHANGELOG.md section of this version, then a line "---" and the install
+      # hints. It ends up in latest.json, so the app's update card shows what changed (up to the "---").
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${TAG#v}"
+          VERSION="${VERSION%%-*}"
+          CHANGES=$(awk -v v="$VERSION" '/^## /{p=($2==v)} p' CHANGELOG.md | sed '1d')
+          if [ -z "$(echo "$CHANGES" | tr -d '[:space:]')" ]; then
+            echo "::warning::No CHANGELOG.md section for $VERSION, the release notes will be generic"
+            CHANGES="Version $VERSION."
+          fi
+          {
+            echo 'body<<NOTES_EOF'
+            echo "$CHANGES"
+            echo
+            echo '---'
+            echo "$INSTALL_HINTS"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+        env:
+          INSTALL_HINTS: "The first install on a machine is manual and the installers are not code-signed yet, so it needs one extra step. Windows: SmartScreen > More info > Run anyway. macOS: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`. Apps that already include the updater offer this version on the island and install it on one click (signature-checked)."
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,7 +102,7 @@ jobs:
         with:
           tagName: ${{ env.TAG }}
           releaseName: "Session Buddy ${{ env.TAG }}"
-          releaseBody: "Apps that already include the updater offer this version on the island and install it on one click (signature-checked). The first install of any machine is manual, and the installers are not code-signed, so it needs one extra step. Windows: SmartScreen > More info > Run anyway. macOS: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true

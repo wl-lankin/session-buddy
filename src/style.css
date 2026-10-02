@@ -475,7 +475,7 @@ body {
   font: 500 11.5px var(--font);
   cursor: pointer;
 }
-.x-tabs .tab:not(.on):not(.recent-pill) { min-width: 40px; }
+.x-tabs .tab:not(.on):not(.recent-pill):not(.chat-tab) { min-width: 40px; }
 .x-tabs .tab.on { background: var(--tab-on); color: var(--ink); flex: 0 0 auto; max-width: 50%; }
 .x-tabs .tab.many:not(.on) { padding: 0 7px; gap: 4px; }
 .x-tabs .tab:hover { color: var(--ink-2); }
@@ -1088,7 +1088,7 @@ body {
 .c-detach:hover { background: rgba(244, 80, 94, 0.25); color: var(--red-text); }
 .c-hint { font: 400 10.5px/14px var(--font); color: var(--dim-5); white-space: nowrap; }
 
-.x-tabs .chat-tab { position: relative; flex: 0 0 auto; margin-left: auto; padding: 0 9px; color: var(--dim-3); background: rgba(255, 255, 255, 0.04); }
+.x-tabs .chat-tab { position: relative; flex: 0 0 26px; width: 26px; min-width: 0; margin-left: auto; padding: 0; color: var(--dim-3); background: rgba(255, 255, 255, 0.04); }
 .x-tabs .chat-tab + .recent-pill { margin-left: 0; }
 .x-tabs .chat-tab:hover { color: var(--ink-2); background: rgba(255, 255, 255, 0.09); }
 .x-tabs .chat-tab svg { display: block; }

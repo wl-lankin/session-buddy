@@ -77,9 +77,12 @@ fn clip(text: &str, max: usize) -> String {
     out
 }
 
+/// The release body is the changes, then a line `---` and the install hints, which the card leaves out.
 fn clip_notes(notes: Option<&str>) -> Option<String> {
-    let notes = notes?.trim();
-    (!notes.is_empty()).then(|| clip(notes, MAX_NOTES))
+    let notes = notes?;
+    let changes = notes.lines().take_while(|l| l.trim() != "---").collect::<Vec<_>>().join("\n");
+    let changes = changes.trim();
+    (!changes.is_empty()).then(|| clip(changes, MAX_NOTES))
 }
 
 /// One short line: the first line of the error, clipped.
@@ -271,6 +274,8 @@ mod tests {
         assert_eq!(clip_notes(None), None);
         assert_eq!(clip_notes(Some("  \n ")), None);
         assert_eq!(clip_notes(Some(" fixes ")).as_deref(), Some("fixes"));
+        assert_eq!(clip_notes(Some("- a\n- b\n\n---\nInstall hints")).as_deref(), Some("- a\n- b"));
+        assert_eq!(clip_notes(Some("---\nonly hints")), None);
         let long = "ä".repeat(1500);
         let clipped = clip_notes(Some(&long)).unwrap();
         assert_eq!(clipped.chars().count(), MAX_NOTES);

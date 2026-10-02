@@ -19,3 +19,7 @@ Updates are verified with a minisign key pair made for this app.
 ## First updater version
 
 Only apps that already contain the updater can update. The first version that ships it must be installed by hand; from then on updates come through the app.
+
+## Release notes
+
+Write the section for the new version in `CHANGELOG.md` (`## <version> - <title>`, a few plain lines) before tagging. The release workflow copies it into the release text, above a line `---` and the install hints. The same text goes into `latest.json`, and the app's update card shows everything before the `---`. If the section is missing the workflow warns and the notes are only "Version X.Y.Z.".

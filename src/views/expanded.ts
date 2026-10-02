@@ -56,7 +56,7 @@ function chatButton(actions: ViewActions): Node {
         actions.openChat();
       },
     },
-    svg(ICONS.bubble, 13),
+    svg(ICONS.bubble, 15),
     unread ? h("i", { class: "chat-dot" }) : null,
   );
 }

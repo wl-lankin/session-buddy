@@ -19,7 +19,7 @@ import { newlyDelivered } from "../model/messages";
 import { newPlan, planSession } from "../model/plan";
 import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";
 import { newActionIds } from "../model/actions";
-import { checkFailedText, isBusy, latestText, mayAutoOpen, mayShowNote, reduceUpdate, type UpdateInfo } from "../model/update";
+import { cardKind, checkFailedText, isBusy, latestText, mayAutoOpen, mayShowNote, reduceUpdate, type UpdateInfo } from "../model/update";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
@@ -1176,7 +1176,7 @@ export class Island {
   };
 
   private updateBotTargets() {
-    const p = botPosition(State.mode, State.view);
+    const p = botPosition(State.mode, State.view, State.view === "update" && cardKind(State.update, State.updateNote) === "note");
     // Beside a notch the strip's Buddy sits in the cap, left of the notch.
     const inCap = State.mode === "strip" && this.notch.top > 0;
     this.botCx.target = inCap ? 22 : p.cx;

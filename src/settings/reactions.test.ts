@@ -18,6 +18,13 @@ describe("reactionFor", () => {
   });
 });
 
+describe("local model reactions", () => {
+  it("is happy for a working server and shows the error face otherwise", () => {
+    expect(reactionFor({ kind: "ollama", ok: true })?.emote).toBe("happy");
+    expect(reactionFor({ kind: "ollama", ok: false })?.state).toBe("error");
+  });
+});
+
 describe("restingState", () => {
   it("sleeps while sound is off", () => {
     expect(restingState(false)).toBe("sleeping");

@@ -7,6 +7,8 @@ import { buildInteraction } from "./cards";
 import { buildFinished } from "./finished";
 import { buildPlan } from "./plan";
 import { buildChatView } from "./chat";
+import type { ChatModels } from "../core/bridge";
+import type { Settings } from "../core/state";
 import type { SuggestionContext } from "../model/chat";
 
 export interface ChatActions {
@@ -16,6 +18,10 @@ export interface ChatActions {
   /** A new chat: clears the transcript and the conversation. */
   reset(): void;
   setEnabled(on: boolean): void;
+  /** Saves a new provider/model choice; the backend restarts the process itself. */
+  setModel(patch: Partial<Settings>): void;
+  /** The local models the Ollama server offers. */
+  models(): Promise<ChatModels>;
   /** The user is (or stopped) typing in the composer: Buddy looks down at it. */
   typing(on: boolean): void;
 }

@@ -12,3 +12,20 @@ export function normalizeNumber(raw: number | string, min: number, max: number, 
 export function secondsLabel(value: number): string {
   return value === 0 ? "Immediately" : "seconds";
 }
+
+export const DEFAULT_OLLAMA_URL = "http://localhost:11434";
+
+/** A server address the backend can use: scheme added, trailing slashes dropped, empty means the default. */
+export function normalizeOllamaUrl(raw: string): string {
+  const t = raw.trim();
+  if (!t) return DEFAULT_OLLAMA_URL;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `http://${t}`;
+  return withScheme.replace(/\/+$/, "");
+}
+
+/** The line next to the Ollama Test button. */
+export function ollamaTestText(reachable: boolean, count: number, url: string): string {
+  if (!reachable) return `Ollama is not reachable at ${url} - start it with \`ollama serve\``;
+  if (count === 0) return "Reachable, but it has no models yet. Try: ollama pull qwen2.5:7b";
+  return `Reachable - ${count} ${count === 1 ? "model" : "models"}`;
+}

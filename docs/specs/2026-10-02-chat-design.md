@@ -123,3 +123,11 @@ A "Chat" section: the on/off switch, idle minutes, and a read-only line showing 
 ## Out of scope for now
 
 Persisted history, file attachments, switching model per message, voice.
+
+## Models and Ollama
+
+Settings: `chatProvider` (`"claude"` default or `"ollama"`), `chatModel` (Claude alias or full id, default `haiku`), `chatOllamaModel` (default empty), `chatOllamaUrl` (default `http://localhost:11434`). Names allow only `[A-Za-z0-9._:/@-]`, 1 to 100 chars. The URL must be http(s) with a host, no user info, query or fragment; a trailing slash is trimmed. Invalid values make `chat_send` return an error and nothing is spawned; provider `ollama` with an empty model returns "Choose an Ollama model in Settings".
+
+The Ollama provider runs the same process with `ANTHROPIC_BASE_URL=<url>`, `ANTHROPIC_AUTH_TOKEN=ollama`, `ANTHROPIC_API_KEY=` (empty), `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and the args `--model <ollama model> --tools "" --no-session-persistence --strict-mcp-config`. There is no web search (WebSearch is an Anthropic server tool) and no `--allowedTools`; the style prompt does not mention the web. The first answer takes about 7 s while Ollama loads the model. Everything stays on the machine.
+
+`ChatStatus` also carries `provider`, `model` (effective name) and `webSearch` (true only for Claude). `chat_models(url?)` returns `{ reachable, models, error? }` from `GET <url>/api/tags` (2 s timeout, models sorted). Changing provider, model, Ollama model or URL in `save_settings` stops a running process (status `off`); the next send starts it with the new settings.

@@ -17,6 +17,8 @@ async function island(): Promise<NonNullable<Window["__sb"]>> {
 }
 
 const sb = await island();
+// ?quiet=1 leaves out the plan, the waiting cards and the finishes, so a view can be tried in peace.
+const QUIET = new URLSearchParams(location.search).get("quiet") === "1";
 const full = demoSnapshot(Date.now());
 let snap: Snapshot = { ...full, sessions: full.sessions.map((s) => (s.pending.length ? { ...s, pending: [], status: "working" } : s)) };
 const push = () => sb.snapshot({ ...snap, now: Date.now() });
@@ -45,10 +47,12 @@ const setPlan = (plan: string | null) => {
   snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === "a" ? { ...s, plan } : s)) };
   push();
 };
-setTimeout(() => setPlan(PLAN), 13_000);
-setTimeout(() => setPlan(null), 19_000);
+if (!QUIET) {
+  setTimeout(() => setPlan(PLAN), 13_000);
+  setTimeout(() => setPlan(null), 19_000);
+}
 
-setTimeout(() => {
+if (!QUIET) setTimeout(() => {
   const waiting = new Map(full.sessions.filter((s) => s.pending.length).map((s) => [s.id, s]));
   snap = { ...snap, sessions: snap.sessions.map((s) => (waiting.has(s.id) ? { ...s, pending: waiting.get(s.id)!.pending, status: "needs_you" } : s)) };
   push();
@@ -98,5 +102,7 @@ const finishes = () => {
   setTimeout(() => sb.cues([{ sessionId: "a", kind: "finish" }]), 3_000);
 };
 // A single finish first (after the greeting), so the one-session card is visible too.
-setTimeout(() => sb.cues([{ sessionId: "e", kind: "finish", turnMs: 95_000 }]), 9_000);
-setInterval(finishes, 20_000);
+if (!QUIET) {
+  setTimeout(() => sb.cues([{ sessionId: "e", kind: "finish", turnMs: 95_000 }]), 9_000);
+  setInterval(finishes, 20_000);
+}

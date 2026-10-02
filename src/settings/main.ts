@@ -2,20 +2,21 @@
 // sounds, island timing, sessions, start-up.
 
 import "./settings.css";
-import { Bridge, IS_TAURI, type BootInfo, type InstallStatus } from "../core/bridge";
+import { Bridge, IS_TAURI, onEvent, type BootInfo, type InstallStatus } from "../core/bridge";
 import { installNoBrowser } from "../core/nobrowser";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { Sound } from "../core/sound";
 import { ICONS } from "../views/icons";
 import { h, svg } from "../views/dom";
 import { headerBuddy, type HeaderBuddy } from "./buddy";
-import { normalizeNumber, secondsLabel } from "./helpers";
+import { DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, secondsLabel } from "./helpers";
 import { buddyMark } from "./mark";
 import type { SettingsEvent } from "./reactions";
 
 // ?demo=1 in a plain browser: a fake boot result for the README screenshots.
 const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "1";
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS }, version: "1.0.4" };
+// &ollama=down|empty picks the fake Ollama server's answer for the Test button.
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true }, version: "1.0.4" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,
@@ -156,29 +157,58 @@ function installSection(): HTMLElement {
 }
 
 function chatSection(): HTMLElement {
-  const cli = h("div", { class: "kv" }, h("span", { class: "k", text: "Claude CLI" }), h("span", { class: "v", text: "checking..." }));
-  const value = cli.querySelector<HTMLElement>(".v");
+  const cliState = h("span", { class: "v pill off", text: "checking..." });
+  const cli = h("div", { class: "kv" }, h("span", { class: "k", text: "Claude CLI" }), cliState);
   const check = async () => {
     const st = await Bridge.chatStatus();
-    if (!value) return;
-    if (!st) value.textContent = "could not ask Session Buddy";
-    else value.textContent = st.claudeFound ? `found${st.detail ? `: ${st.detail}` : ""}` : "not found (install Claude Code, or enter its path above)";
+    cliState.className = `v pill ${st?.claudeFound ? "ok" : "off"}`;
+    if (!st) cliState.textContent = "could not ask Session Buddy";
+    else cliState.textContent = st.claudeFound ? `found${st.detail ? `: ${st.detail}` : ""}` : "not found - install Claude Code, or enter its path below";
   };
   void check();
-  const path = h("input", { type: "text", value: settings.chatClaudePath, placeholder: "found automatically" });
+  const path = h("input", { type: "text", value: settings.chatClaudePath, placeholder: "Detected automatically" });
   path.addEventListener("change", () => {
     settings.chatClaudePath = path.value.trim();
     save();
     void check();
   });
+
+  const url = h("input", { type: "text", value: settings.chatOllamaUrl, placeholder: DEFAULT_OLLAMA_URL });
+  const result = h("span", { class: "test-text" });
+  const resultRow = h("div", { class: "msg calm" }, result);
+  const test = h("button", { type: "button", text: "Test" });
+  url.addEventListener("change", () => {
+    settings.chatOllamaUrl = normalizeOllamaUrl(url.value);
+    url.value = settings.chatOllamaUrl;
+    save();
+  });
+  let token = 0;
+  test.addEventListener("click", () => {
+    const mine = ++token;
+    const target = normalizeOllamaUrl(url.value);
+    test.disabled = true;
+    result.textContent = "Asking Ollama...";
+    resultRow.classList.remove("down");
+    void Bridge.chatModels(target).then((r) => {
+      if (mine !== token) return;
+      test.disabled = false;
+      result.textContent = ollamaTestText(r.reachable, r.models.length, target);
+      resultRow.classList.toggle("down", !r.reachable);
+      tell({ kind: "ollama", ok: r.reachable });
+    });
+  });
+
   return card(
     "Chat",
     ICONS.bubble,
-    h("p", { class: "note", text: "A chat in the island, answered by a background Claude Code with Haiku. It runs only while you use it, can search the web and nothing else, and writes nothing to disk. Your messages go to Anthropic with your own Claude login and count against your plan." }),
+    h("p", { class: "note", text: "A chat in the island, answered by a background Claude Code or by a model running locally in Ollama. It runs only while you use it, can read nothing on your disk and writes nothing to it." }),
+    h("p", { class: "note tight", text: "Choose the model in the chat header." }),
     row("Chat", toggle(() => settings.chatEnabled, (v) => { settings.chatEnabled = v; void check(); tell({ kind: "chat", on: v }); }), "adds a bubble to the island, off by default"),
-    row("Stops after", numberInput(() => settings.chatIdleMinutes, (v) => (settings.chatIdleMinutes = v), 0, 240, 1, true, (v) => (v === 0 ? "Never" : "minutes")), "idle time before the background Claude stops"),
-    row("Claude path", path, "only if the CLI is not found"),
+    row("Stop after idle", numberInput(() => settings.chatIdleMinutes, (v) => (settings.chatIdleMinutes = v), 0, 240, 1, true, (v) => (v === 0 ? "Never" : "minutes")), "idle time before the background process stops"),
     cli,
+    row("Claude CLI path", path, "optional, only to override the automatic detection"),
+    row("Ollama server", h("span", { class: "field" }, url, test), "address of a local or network Ollama"),
+    resultRow,
   );
 }
 
@@ -255,6 +285,10 @@ async function main() {
   }
   settings = { ...settings, ...boot.settings };
   Sound.setEnabled(settings.soundEnabled);
+  // The model is picked in the island: take it over so a later save here does not undo it.
+  void onEvent<Settings>("settings-changed", (s) => {
+    settings = { ...settings, chatProvider: s.chatProvider, chatModel: s.chatModel, chatOllamaModel: s.chatOllamaModel };
+  });
   buddy = headerBuddy(settings.soundEnabled);
 
   const volume = h("input", { type: "range", min: 0, max: 0.2, step: 0.01 });

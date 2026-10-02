@@ -129,12 +129,12 @@ export function currentActivity(s: Session): string {
   }
 }
 
-export function limitsShort(u: Usage): { text: string; level: Level } {
-  const parts: string[] = [];
-  let worst = 0;
-  if (u.fiveHour) { parts.push(`5H ${fmtPct(u.fiveHour.usedPct)}%`); worst = Math.max(worst, u.fiveHour.usedPct); }
-  if (u.sevenDay) { parts.push(`7D ${fmtPct(u.sevenDay.usedPct)}%`); worst = Math.max(worst, u.sevenDay.usedPct); }
-  return { text: parts.join(" · "), level: parts.length ? level(worst) : "ok" };
+/** The strip's limits, each window with its own level. */
+export function limitParts(u: Usage): { text: string; level: Level }[] {
+  const out: { text: string; level: Level }[] = [];
+  if (u.fiveHour) out.push({ text: `5H ${fmtPct(u.fiveHour.usedPct)}%`, level: level(u.fiveHour.usedPct) });
+  if (u.sevenDay) out.push({ text: `7D ${fmtPct(u.sevenDay.usedPct)}%`, level: level(u.sevenDay.usedPct) });
+  return out;
 }
 
 /** Visible text of the account label: email and plan only, the org lives in the tooltip. */

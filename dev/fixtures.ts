@@ -104,11 +104,11 @@ export function demoSnapshot(now: number): Snapshot {
 export function demoChat(now: number, kind: "full" | "empty" | "off" = "full"): ChatAction[] {
   const at = (s: number) => now - (600 - s) * 1000;
   const ev = (s: number, event: ChatEvent): ChatAction => ({ type: "event", event, at: at(s), viewing: true });
-  if (kind !== "full") return [{ type: "status", status: { enabled: kind === "empty", state: kind === "empty" ? "ready" : "off", claudeFound: true }, at: at(0) }];
+  if (kind !== "full") return [{ type: "status", status: { enabled: kind === "empty", state: kind === "empty" ? "ready" : "off", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: at(0) }];
   const first = "**pushdocs** is fixing the DATEV 409 handling.\n\n1. It read `DatevClient.php` and searched for the fault\n2. The last test run failed, so it is editing the client again\n\nNothing needs you right now. To rerun the failing test yourself:\n\n```bash\nphp artisan test --filter Datev\n```";
   const second = "Claude Code 2.1 starts about twice as fast and has a tidier `/permissions` screen.\n\nSee the [release notes](https://docs.claude.com/en/release-notes/claude-code) for the full list.";
   return [
-    { type: "status", status: { enabled: true, state: "ready", claudeFound: true }, at: at(0) },
+    { type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: at(0) },
     { type: "send", text: "What is pushdocs doing right now?", context: { kind: "session", label: "pushdocs \u00B7 PDD-1981" }, at: at(10) },
     ev(11, { type: "turn", id: "t1" }),
     ev(12, { type: "delta", id: "t1", text: first }),

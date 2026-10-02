@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, Extra, Interaction, Session, Usage } from "../core/types";
 import {
-  accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitsShort, loudest, modelName, orderSessions, pendingQueue, recentClass,
+  accountLabel, accountTitle, answersFor, botStateFor, currentActivity, cycle, limitParts, loudest, modelName, orderSessions, pendingQueue, recentClass,
   agentGroups, emailParts, extraView, oauthNote, rowLevel, finishedAgentLabel, recentCount, resolveFocus, sessionTitle, statusLine, stripLabel, summarize, visibleSessions,
 } from "./viewmodel";
 
@@ -125,8 +125,9 @@ describe("viewmodel", () => {
 
   it("limits and account", () => {
     const u: Usage = { fiveHour: { usedPct: 42, resetsAt: null, severity: "normal" }, sevenDay: { usedPct: 91, resetsAt: null, severity: "normal" }, limits: [], extra: null, source: "oauth", updatedAt: 1, error: null, oauthUpdatedAt: 1, oauthError: null, account: { email: "w@x.de", org: "finodata", plan: "Team" } };
-    expect(limitsShort(u)).toEqual({ text: "5H 42% · 7D 91%", level: "crit" });
-    expect(limitsShort({ ...u, fiveHour: null, sevenDay: null })).toEqual({ text: "", level: "ok" });
+    expect(limitParts(u)).toEqual([{ text: "5H 42%", level: "ok" }, { text: "7D 91%", level: "crit" }]);
+    expect(limitParts({ ...u, sevenDay: { ...u.sevenDay!, usedPct: 73 } })[1]).toEqual({ text: "7D 73%", level: "warn" });
+    expect(limitParts({ ...u, fiveHour: null, sevenDay: null })).toEqual([]);
     expect(accountLabel(u)).toBe("w@x.de · Team");
     expect(accountTitle(u)).toBe("w@x.de · finodata · Team");
     expect(accountLabel({ ...u, account: null })).toBe("");

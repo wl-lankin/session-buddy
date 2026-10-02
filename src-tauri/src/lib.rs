@@ -83,9 +83,9 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
-    let (screen_changed, autostart_changed, hotkey_changed, chat_turned_off) = {
+    let (screen_changed, autostart_changed, hotkey_changed, chat_turned_off, chat_config_changed) = {
         let mut current = shared.settings.lock().unwrap();
-        let changed = (current.screen != settings.screen, current.autostart != settings.autostart, current.hotkey != settings.hotkey, current.chat_enabled && !settings.chat_enabled);
+        let changed = (current.screen != settings.screen, current.autostart != settings.autostart, current.hotkey != settings.hotkey, current.chat_enabled && !settings.chat_enabled, chat::restart_needed(&current, &settings));
         *current = settings.clone();
         changed
     };
@@ -106,7 +106,7 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     if hotkey_changed {
         register_hotkey(&app, &settings.hotkey);
     }
-    if chat_turned_off {
+    if chat_turned_off || chat_config_changed {
         chat::stop(&app);
     }
     mark_dirty();
@@ -392,7 +392,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release,
             install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app, chat::chat_send, chat::chat_wake, chat::chat_interrupt,
-            chat::chat_reset, chat::chat_status
+            chat::chat_reset, chat::chat_status, chat::chat_models
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

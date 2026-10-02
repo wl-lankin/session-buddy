@@ -1,10 +1,10 @@
 // Buddy Chat on the island side: folds backend events into State.chat, plays the
 // chat sounds, decides how long Buddy keeps a face and talks to the bridge.
 
-import { Bridge } from "../core/bridge";
+import { Bridge, type ChatModels } from "../core/bridge";
 import type { BotEmoteName, BotStateName } from "../core/layout";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, type Settings } from "../core/state";
 import {
   BUDDY_FLASH_MS, buildOverviewBlock, buildSessionBlock, canSend, chatBuddy, chatMoments, composePrompt, isBusy, overviewChip, reduceChat,
   sessionChip, type ChatAction, type ChatEvent, type ContextChip, type SuggestionContext,
@@ -50,8 +50,8 @@ export class ChatController {
   applySettings() {
     const on = State.settings.chatEnabled;
     this.dispatch({ type: "enabled", on, at: Date.now() });
-    if (on) void this.refreshStatus();
-    else if (State.chat.claudeFound === null) void this.refreshStatus();
+    // The model may have changed even while the chat is off: the header and the Off card name it.
+    void this.refreshStatus();
   }
 
   async refreshStatus() {
@@ -113,6 +113,18 @@ export class ChatController {
       if (this.host.viewing()) void Bridge.chatWake();
       void this.refreshStatus();
     }
+  }
+
+  setModel(patch: Partial<Settings>) {
+    if (isBusy(State.chat)) return;
+    State.settings = { ...State.settings, ...patch };
+    Sound.play("blip");
+    State.notify();
+    void Bridge.saveSettings(State.settings).then(() => this.refreshStatus());
+  }
+
+  models(): Promise<ChatModels> {
+    return Bridge.chatModels(State.settings.chatOllamaUrl);
   }
 
   typing(on: boolean) {

@@ -2,7 +2,8 @@
 // dev/preview.html): streaming text, a fake web search, a done event.
 
 import type { ChatEvent, ChatState, ChatStatus } from "../model/chat";
-import { State } from "./state";
+import type { ChatModels } from "./bridge";
+import { DEFAULT_SETTINGS, State } from "./state";
 
 type Emit = (e: ChatEvent) => void;
 
@@ -47,7 +48,7 @@ function answerFor(text: string, searched: boolean): string {
 
 function run(text: string) {
   const id = `t${++turns}`;
-  const searched = SEARCH.test(text.split("</attached-session>").pop() ?? text);
+  const searched = State.settings.chatProvider !== "ollama" && SEARCH.test(text.split("</attached-session>").pop() ?? text);
   const full = answerFor(text, searched);
   setStatus("busy");
   emit({ type: "turn", id });
@@ -81,20 +82,55 @@ function run(text: string) {
 function ensureRunning(then: () => void) {
   if (state === "off" || state === "error") {
     setStatus("starting");
-    later(700, () => {
+    later(State.settings.chatProvider === "ollama" ? 1600 : 700, () => {
       setStatus("ready");
       then();
     });
   } else then();
 }
 
+const FAKE_MODELS = ["qwen2.5:7b", "gemma2:9b", "mistral-small:latest"];
+
+/** ?ollama=down or ?ollama=empty in the page URL picks the unreachable or the empty answer. */
+function fakeModels(url: unknown): ChatModels {
+  const mode = new URLSearchParams(location.search).get("ollama");
+  const target = String(url || State.settings.chatOllamaUrl);
+  if (mode === "down" || /offline/.test(target)) return { reachable: false, models: [], error: "connection refused" };
+  if (mode === "empty") return { reachable: true, models: [] };
+  return { reachable: true, models: FAKE_MODELS };
+}
+
+const runKey = (c: typeof DEFAULT_SETTINGS) => `${c.chatProvider}|${c.chatProvider === "ollama" ? c.chatOllamaModel : c.chatModel}|${c.chatOllamaUrl}`;
+let lastRun = runKey(DEFAULT_SETTINGS);
+
+/** The real backend stops the process when provider, model or address change. */
+function settingsSaved() {
+  const { chatProvider: provider, chatModel, chatOllamaModel } = State.settings;
+  const model = provider === "ollama" ? chatOllamaModel : chatModel;
+  const key = runKey(State.settings);
+  if (key === lastRun) return;
+  lastRun = key;
+  cancel();
+  state = "off";
+  emit({ type: "status", state: "off", provider, model, webSearch: provider !== "ollama" });
+}
+
 export function fakeChat(cmd: string, args?: Record<string, unknown>): { value: unknown } | null {
   const enabled = State.settings.chatEnabled;
   switch (cmd) {
     case "chat_status": {
-      const status: ChatStatus = { enabled, state: enabled ? state : "off", claudeFound: true };
+      const { chatProvider: provider, chatModel, chatOllamaModel } = State.settings;
+      const local = provider === "ollama";
+      const status: ChatStatus = {
+        enabled, state: enabled ? state : "off", claudeFound: true, provider, model: local ? chatOllamaModel : chatModel, webSearch: !local,
+      };
       return { value: status };
     }
+    case "save_settings":
+      settingsSaved();
+      return { value: undefined };
+    case "chat_models":
+      return { value: fakeModels(args?.url) };
     case "chat_wake":
       if (enabled && state === "off") ensureRunning(() => {});
       return { value: undefined };

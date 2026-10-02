@@ -4,12 +4,13 @@
 import type { BotEmoteName, BotStateName } from "../core/layout";
 import type { Session } from "../core/types";
 import { firstLine } from "./format";
+import type { ChatProvider } from "./chatmodel";
 
 export type ChatState = "off" | "starting" | "ready" | "busy" | "error";
 
 /** The backend's `chat-event` payload (docs/specs/2026-10-02-chat-design.md). */
 export type ChatEvent =
-  | { type: "status"; state: ChatState; detail?: string }
+  | ({ type: "status"; state: ChatState; detail?: string } & Partial<ModelInfo>)
   | { type: "turn"; id: string }
   | { type: "thinking"; id: string }
   | { type: "delta"; id: string; text: string }
@@ -17,14 +18,17 @@ export type ChatEvent =
   | { type: "done"; id: string; text: string; durationMs: number; costUsd?: number }
   | { type: "error"; id?: string; message: string };
 
-export interface ChatStatus { enabled: boolean; state: ChatState; claudeFound: boolean; detail?: string }
+/** The model the backend runs (effective name) and whether it can search the web. */
+export interface ModelInfo { provider: ChatProvider; model: string; webSearch: boolean }
+
+export interface ChatStatus extends ModelInfo { enabled: boolean; state: ChatState; claudeFound: boolean; detail?: string }
 
 export interface ToolPill { callId: string; tool: string; label: string; state: "running" | "done" | "error" }
 
 /** What the user's bubble shows instead of the attached block. */
 export interface ContextChip { kind: "session" | "overview"; label: string }
 
-export type DividerReason = "sleep" | "reset" | "off";
+export type DividerReason = "sleep" | "reset" | "off" | "model";
 
 export type ChatItem =
   | { kind: "user"; id: string; text: string; context: ContextChip | null; at: number }
@@ -35,7 +39,7 @@ export type ChatItem =
   | { kind: "divider"; id: string; reason: DividerReason; at: number }
   | { kind: "error"; id: string; message: string; at: number };
 
-export interface ChatModel {
+export interface ChatModel extends ModelInfo {
   items: ChatItem[];
   enabled: boolean;
   state: ChatState;
@@ -53,7 +57,7 @@ export interface ChatModel {
 }
 
 export function initialChat(): ChatModel {
-  return { items: [], enabled: false, state: "off", detail: null, claudeFound: null, turnId: null, awaiting: false, unread: false, stopPending: false, seq: 0 };
+  return { items: [], provider: "claude", model: "haiku", webSearch: true, enabled: false, state: "off", detail: null, claudeFound: null, turnId: null, awaiting: false, unread: false, stopPending: false, seq: 0 };
 }
 
 export type ChatAction =
@@ -115,14 +119,22 @@ function abandonTurn(m: ChatModel, message: string): ChatModel {
   return next;
 }
 
-function setState(m: ChatModel, state: ChatState, detail: string | null, at: number): ChatModel {
+/** Takes over what the backend says it runs; `changed` when a known model was swapped. */
+function withInfo(m: ChatModel, info: Partial<ModelInfo>): { m: ChatModel; changed: boolean } {
+  const provider = info.provider ?? m.provider;
+  const model = info.model ?? m.model;
+  const changed = (provider !== m.provider || model !== m.model) && m.claudeFound !== null;
+  return { m: { ...m, provider, model, webSearch: info.webSearch ?? m.webSearch }, changed };
+}
+
+function setState(m: ChatModel, state: ChatState, detail: string | null, at: number, modelChanged = false): ChatModel {
   let next: ChatModel = { ...m, detail };
   if (state === m.state) return next;
   const prev = m.state;
   next.state = state;
   if (state === "off") {
     if (isBusy(next)) next = abandonTurn(next, "The chat stopped before it answered.");
-    if (next.enabled) next = withDivider(next, next.stopPending ? "reset" : "sleep", at);
+    if (next.enabled) next = withDivider(next, next.stopPending ? "reset" : modelChanged ? "model" : "sleep", at);
     next.stopPending = false;
   } else if (state === "error") {
     if (isBusy(next)) next = abandonTurn(next, detail ?? "The chat stopped before it answered.");
@@ -139,8 +151,9 @@ function setState(m: ChatModel, state: ChatState, detail: string | null, at: num
 export function reduceChat(m: ChatModel, a: ChatAction): ChatModel {
   switch (a.type) {
     case "status": {
-      const next = { ...m, enabled: a.status.enabled, claudeFound: a.status.claudeFound };
-      return setState(next, a.status.state, a.status.detail ?? null, a.at);
+      const info = withInfo(m, a.status);
+      const next = { ...info.m, enabled: a.status.enabled, claudeFound: a.status.claudeFound };
+      return setState(next, a.status.state, a.status.detail ?? null, a.at, info.changed);
     }
     case "enabled": {
       if (a.on === m.enabled) return m;
@@ -182,8 +195,10 @@ export function reduceChat(m: ChatModel, a: ChatAction): ChatModel {
 
 function reduceEvent(m: ChatModel, e: ChatEvent, at: number, viewing: boolean): ChatModel {
   switch (e.type) {
-    case "status":
-      return setState(m, e.state, e.detail ?? null, at);
+    case "status": {
+      const info = withInfo(m, e);
+      return setState(info.m, e.state, e.detail ?? null, at, info.changed);
+    }
     case "turn": {
       const next = ensureAnswer(m, e.id, at);
       return { ...next, turnId: e.id, awaiting: false };
@@ -245,7 +260,7 @@ export function statusText(m: ChatModel): string {
   if (isSearching(m)) return "Searching the web";
   if (m.awaiting || m.turnId) return activeAnswer(m)?.text ? "Writing" : "Thinking";
   switch (m.state) {
-    case "starting": return "Starting";
+    case "starting": return m.provider === "ollama" ? "Loading the model" : "Starting";
     case "error": return "Error";
     case "busy": return "Working";
     case "off": return "Asleep, wakes on your next message";
@@ -352,7 +367,7 @@ export interface Suggestion { id: string; label: string; prompt: string; context
 
 const hasFailure = (s: Session): boolean => s.status === "error" || s.steps.some((st) => st.ok === false);
 
-export function buildSuggestions(sessions: Session[], focusId: string | null): Suggestion[] {
+export function buildSuggestions(sessions: Session[], focusId: string | null, webSearch = true): Suggestion[] {
   const live = sessions.filter((s) => s.live && s.status !== "stale");
   const focus = live.find((s) => s.id === focusId) ?? live[0] ?? null;
   const out: Suggestion[] = [];
@@ -376,7 +391,7 @@ export function buildSuggestions(sessions: Session[], focusId: string | null): S
       context: { kind: "session", sessionId: failing.id },
     });
   }
-  out.push({ id: "web", label: "Search the web for Claude Code news", prompt: "Search the web for the latest Claude Code release notes and tell me what is new.", context: null });
+  if (webSearch) out.push({ id: "web", label: "Search the web for Claude Code news", prompt: "Search the web for the latest Claude Code release notes and tell me what is new.", context: null });
   if (!live.length) out.push({ id: "can", label: "What can you do here?", prompt: "What can you help me with in this little chat?", context: null });
   return out.slice(0, 4);
 }

@@ -7,6 +7,10 @@ import {
   activeAnswer, buildSessionBlock, buildSuggestions, canSend, dotState, isBusy, sessionChip, statusText, toolText,
   type ChatItem, type ChatState, type Suggestion, type ToolPill,
 } from "../model/chat";
+import { modelBadge, offLines } from "../model/chatmodel";
+import {
+  choicePatch, initialRow, modelsStale, pickerLock, pickerRows, selectedModel, stepRow, type LocalModels, type PickerRow,
+} from "../model/chatpicker";
 import { fmtDuration } from "../model/format";
 import { h, svg } from "./dom";
 import { ICONS } from "./icons";
@@ -60,6 +64,17 @@ export function buildChatView(actions: ViewActions): ViewHost {
   const pin = pinButton(() => actions.togglePin());
   const dot = h("i", { class: "c-dot off" });
   const statusEl = h("span", { class: "c-status", text: "Off" });
+  const pickName = h("span", { class: "c-model-name" });
+  const pickLocal = h("span", { class: "c-local", text: "local" });
+  const picker = h(
+    "button",
+    { class: "c-pick", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" },
+    pickName,
+    pickLocal,
+    svg(ICONS.chevronDown, 9, { stroke: 2.8 }),
+  );
+  const modelEl = h("span", { class: "c-model" }, picker);
+  const menu = h("div", { class: "c-menu", role: "menu", "aria-label": "Chat model" });
   const power = h("button", {
     class: "c-power",
     role: "switch",
@@ -82,7 +97,7 @@ export function buildChatView(actions: ViewActions): ViewHost {
   const head = h(
     "div",
     { class: "c-head" },
-    h("div", { class: "c-who" }, h("div", { class: "c-title", text: "Chat with Buddy" }), h("div", { class: "c-sub" }, dot, statusEl)),
+    h("div", { class: "c-who" }, h("div", { class: "c-title", text: "Chat with Buddy" }), h("div", { class: "c-sub" }, dot, statusEl, modelEl)),
     h("span", { class: "grow" }),
     power,
     newBtn,
@@ -115,7 +130,7 @@ export function buildChatView(actions: ViewActions): ViewHost {
     h("div", { class: "c-tools" }, addBtn, attachedEl, h("span", { class: "grow" }), hint),
   );
   const composer = h("div", { class: "c-composer" }, box);
-  const el = h("div", { class: "view chat-view", "data-mode": "off" }, head, body, composer);
+  const el = h("div", { class: "view chat-view", "data-mode": "off" }, head, body, composer, menu);
 
   // View-local state: it survives switching views because the view itself does.
   let attached: string | null = null;
@@ -215,6 +230,172 @@ export function buildChatView(actions: ViewActions): ViewHost {
     }
   });
 
+
+  // ---- Model picker
+
+  let menuOpen = false;
+  let locked = false;
+  let local: LocalModels = { state: "idle" };
+  let loadedAt = 0;
+  let loadToken = 0;
+  let menuSig = "";
+  let menuRows: PickerRow[] = [];
+  let menuItems: (HTMLElement | null)[] = [];
+
+  const rowKey = (r: PickerRow | undefined) => (r?.type === "choice" ? r.choice.id : r?.type === "retry" ? "retry" : "");
+
+  function renderMenu(force = false) {
+    const rows = pickerRows(State.settings, local);
+    const sig = rows.map((r) => (r.type === "choice" ? `${r.choice.id}${r.choice.active ? "*" : ""}` : r.type === "status" ? r.text : r.type)).join("|");
+    if (!force && sig === menuSig) return;
+    menuSig = sig;
+    const keep = rowKey(menuRows[menuItems.indexOf(document.activeElement as HTMLElement)]);
+    menuRows = rows;
+    menuItems = rows.map((r) => {
+      switch (r.type) {
+        case "group": return null;
+        case "status": return null;
+        case "retry":
+          return h("button", { class: "c-opt c-retry", type: "button", role: "menuitem", tabindex: -1, text: "Retry", onclick: (e: Event) => { e.stopPropagation(); loadLocal(); } });
+        case "choice": {
+          const c = r.choice;
+          return h(
+            "button",
+            { class: "c-opt", type: "button", role: "menuitemradio", "aria-checked": String(c.active), tabindex: -1, onclick: (e: Event) => { e.stopPropagation(); choose(r); } },
+            h("span", { class: "c-tick" }, c.active ? svg(ICONS.check, 12, { stroke: 2.8 }) : null),
+            h("span", { class: "c-opt-text" }, h("span", { class: "c-opt-name", text: c.label }), h("span", { class: "c-opt-note", text: c.note })),
+          );
+        }
+      }
+    });
+    menu.replaceChildren(
+      ...rows.map((r, i) => {
+        if (r.type === "group") return h("div", { class: "c-grp", role: "presentation", text: r.label });
+        if (r.type === "status") return h("div", { class: `c-lstat${r.tone === "down" ? " down" : ""}`, role: "status", text: r.text });
+        return menuItems[i] ?? "";
+      }),
+    );
+    const at = keep ? rows.findIndex((r) => rowKey(r) === keep) : -1;
+    if (at >= 0) menuItems[at]?.focus();
+  }
+
+  function placeMenu() {
+    const box = el.getBoundingClientRect();
+    const scale = el.offsetWidth ? box.width / el.offsetWidth : 1;
+    const anchor = picker.getBoundingClientRect();
+    const width = Math.min(284, el.offsetWidth - 12);
+    const top = (anchor.bottom - box.top) / scale + 6;
+    const left = Math.max(6, Math.min((anchor.left - box.left) / scale - 6, el.offsetWidth - width - 6));
+    menu.style.width = `${width}px`;
+    menu.style.top = `${top}px`;
+    menu.style.left = `${left}px`;
+    menu.style.maxHeight = `${Math.max(120, el.offsetHeight - top - 8)}px`;
+  }
+
+  function loadLocal() {
+    const mine = ++loadToken;
+    if (local.state !== "ok") local = { state: "loading" };
+    renderMenu();
+    void chat.models().then((r) => {
+      if (mine !== loadToken) return;
+      local = r.reachable ? { state: "ok", models: r.models } : { state: "down" };
+      loadedAt = Date.now();
+      if (menuOpen) renderMenu();
+    });
+  }
+
+  const outside = (e: Event) => {
+    const t = e.target as Node;
+    if (!menu.contains(t) && !picker.contains(t)) closeMenu(false);
+  };
+  const leave = () => closeMenu(false);
+
+  function openMenu() {
+    if (menuOpen || locked) return;
+    menuOpen = true;
+    renderMenu(true);
+    placeMenu();
+    menu.classList.add("on");
+    picker.setAttribute("aria-expanded", "true");
+    actions.wantKeyboard(true);
+    document.addEventListener("pointerdown", outside, true);
+    window.addEventListener("blur", leave);
+    if (modelsStale(local, loadedAt, Date.now())) loadLocal();
+    menuItems[initialRow(menuRows)]?.focus();
+  }
+
+  function closeMenu(refocus: boolean) {
+    if (!menuOpen) return;
+    menuOpen = false;
+    menu.classList.remove("on");
+    picker.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", outside, true);
+    window.removeEventListener("blur", leave);
+    loadToken++;
+    if (local.state === "loading") local = { state: "idle" };
+    if (refocus) picker.focus();
+  }
+
+  function choose(r: Extract<PickerRow, { type: "choice" }>) {
+    const patch = choicePatch(r.choice);
+    closeMenu(false);
+    if (patch) chat.setModel(patch);
+    if (State.chat.enabled) focusComposer();
+    else picker.focus();
+  }
+
+  picker.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menuOpen) closeMenu(true);
+    else openMenu();
+  });
+  menu.addEventListener("click", (e) => e.stopPropagation());
+
+  function menuKey(e: KeyboardEvent): boolean {
+    if (!menuOpen) {
+      if (document.activeElement === picker && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        e.preventDefault();
+        openMenu();
+        return true;
+      }
+      return false;
+    }
+    const now = menuItems.indexOf(document.activeElement as HTMLElement);
+    const go = (to: number) => menuItems[to]?.focus();
+    switch (e.key) {
+      case "Escape":
+        e.preventDefault();
+        closeMenu(true);
+        return true;
+      case "ArrowDown":
+        e.preventDefault();
+        go(stepRow(menuRows, now, 1));
+        return true;
+      case "ArrowUp":
+        e.preventDefault();
+        go(stepRow(menuRows, now, -1));
+        return true;
+      case "Home":
+        e.preventDefault();
+        go(stepRow(menuRows, -1, 1));
+        return true;
+      case "End":
+        e.preventDefault();
+        go(stepRow(menuRows, 0, -1));
+        return true;
+      case "Tab":
+        e.preventDefault();
+        closeMenu(true);
+        return true;
+      case "ArrowLeft":
+      case "ArrowRight":
+        e.preventDefault();
+        return true;
+      default:
+        return false;
+    }
+  }
+
   // ---- Rows
 
   function userRow(it: Extract<ChatItem, { kind: "user" }>): HTMLElement {
@@ -274,7 +455,7 @@ export function buildChatView(actions: ViewActions): ViewHost {
         return row;
       }
       case "divider": {
-        const text = it.reason === "sleep" ? "Chat went to sleep" : it.reason === "off" ? "Chat was turned off" : "Context was reset";
+        const text = it.reason === "sleep" ? "Chat went to sleep" : it.reason === "off" ? "Chat was turned off" : it.reason === "model" ? "New context" : "Context was reset";
         return {
           el: h("div", { class: "c-divider", title: `${clock(it.at)}. Earlier messages are not remembered after this point.` }, h("span", { text }), h("small", { text: "earlier messages are forgotten" })),
           kind: "divider", sig: it.reason, shown: 0,
@@ -327,19 +508,13 @@ export function buildChatView(actions: ViewActions): ViewHost {
 
   function offCard(): HTMLElement {
     const missing = State.chat.claudeFound === false;
-    const idle = State.settings.chatIdleMinutes;
+    const lines = offLines({ provider: State.chat.provider, model: State.chat.model, webSearch: State.chat.webSearch, idleMinutes: State.settings.chatIdleMinutes });
     return h(
       "div",
       { class: "c-off" },
       h("div", { class: "c-off-title", text: "Chat with Buddy" }),
-      h("p", { class: "c-off-lead", text: "Quick questions, a look at one of your sessions, or a web search, without leaving the island." }),
-      h(
-        "ul",
-        { class: "c-off-list" },
-        h("li", { text: "Runs a background Claude Code with Haiku, only while you use it" + (idle > 0 ? `, and stops after ${idle} idle minutes` : "") }),
-        h("li", { text: "Web search only: no files, no shell, nothing written to disk" }),
-        h("li", { text: "Your messages go to Anthropic with your own Claude login" }),
-      ),
+      h("p", { class: "c-off-lead", text: State.chat.webSearch ? "Quick questions, a look at one of your sessions, or a web search, without leaving the island." : "Quick questions or a look at one of your sessions, without leaving the island." }),
+      h("ul", { class: "c-off-list" }, ...lines.map((text) => h("li", { text }))),
       missing ? h("div", { class: "c-warn", text: "The Claude Code CLI was not found. Install it, or set its path in Settings." }) : null,
       h(
         "div",
@@ -420,6 +595,17 @@ export function buildChatView(actions: ViewActions): ViewHost {
       const text = statusText(m);
       if (statusEl.textContent !== text) statusEl.textContent = text;
       statusEl.title = m.detail ?? "";
+      const sel = selectedModel(State.settings);
+      const badge = modelBadge(sel.provider, sel.model);
+      const lock = pickerLock(isBusy(m));
+      locked = lock.disabled;
+      picker.setAttribute("aria-disabled", String(locked));
+      picker.classList.toggle("locked", locked);
+      picker.title = locked ? lock.title : `${badge.title}. ${lock.title}`;
+      if (pickName.textContent !== badge.name) pickName.textContent = badge.name;
+      pickLocal.style.display = badge.local ? "" : "none";
+      if (locked) closeMenu(false);
+      else if (menuOpen) renderMenu();
       power.setAttribute("aria-checked", String(m.enabled));
       power.classList.toggle("on", m.enabled);
       power.title = m.enabled ? "Turn chat off" : "Turn chat on";
@@ -437,13 +623,13 @@ export function buildChatView(actions: ViewActions): ViewHost {
         stick = true;
       }
       if (next === "off") {
-        const key = `${m.claudeFound}|${State.settings.chatIdleMinutes}`;
+        const key = `${m.claudeFound}|${State.settings.chatIdleMinutes}|${m.provider}|${m.model}|${m.webSearch}`;
         if (col.dataset.key !== key) {
           col.dataset.key = key;
           col.replaceChildren(offCard());
         }
       } else if (next === "empty") {
-        const list = buildSuggestions(State.allSessions, State.focusId);
+        const list = buildSuggestions(State.allSessions, State.focusId, m.webSearch);
         const key = `${list.map((s) => s.label).join("|")}|${m.claudeFound}`;
         if (col.dataset.key !== key) {
           col.dataset.key = key;
@@ -488,10 +674,12 @@ export function buildChatView(actions: ViewActions): ViewHost {
       if (State.chat.enabled) focusComposer();
     },
     hidden() {
+      closeMenu(false);
       window.clearTimeout(focusTimer);
       input.blur();
     },
     key(e) {
+      if (menuKey(e)) return true;
       if (e.key === "Escape" && document.activeElement === input) {
         e.preventDefault();
         input.blur();

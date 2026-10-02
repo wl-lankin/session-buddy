@@ -21,11 +21,16 @@ export interface Settings {
   finishStyle: FinishStyle;
   /** The finished card only shows for turns at least this long, seconds. */
   finishMinSeconds: number;
-  /** Buddy Chat: a background Claude Code (Haiku), off until the user turns it on. */
+  /** Buddy Chat: a background Claude Code (Claude or a local Ollama model), off until the user turns it on. */
   chatEnabled: boolean;
   /** The chat process stops after this many idle minutes; 0 = never. */
   chatIdleMinutes: number;
+  /** Where the chat model runs: the Claude CLI's own models, or a local Ollama server. */
+  chatProvider: "claude" | "ollama";
+  /** An alias (haiku, sonnet, opus) or a full model id; Claude only. */
   chatModel: string;
+  chatOllamaModel: string;
+  chatOllamaUrl: string;
   chatClaudePath: string;
 }
 
@@ -44,7 +49,10 @@ export const DEFAULT_SETTINGS: Settings = {
   finishMinSeconds: 60,
   chatEnabled: false,
   chatIdleMinutes: 10,
+  chatProvider: "claude",
   chatModel: "haiku",
+  chatOllamaModel: "",
+  chatOllamaUrl: "http://localhost:11434",
   chatClaudePath: "",
 };
 

@@ -28,6 +28,9 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T |
   }
 }
 
+/** Local models an Ollama server offers (`chat_models`). */
+export interface ChatModels { reachable: boolean; models: string[]; error?: string }
+
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
 async function attempt<T>(cmd: string, args?: Record<string, unknown>): Promise<Result<T>> {
@@ -85,6 +88,8 @@ export const Bridge = {
   chatInterrupt: () => call<void>("chat_interrupt"),
   chatReset: () => call<void>("chat_reset"),
   chatStatus: () => call<ChatStatus>("chat_status"),
+  chatModels: async (url?: string): Promise<ChatModels> =>
+    (await call<ChatModels>("chat_models", url ? { url } : undefined)) ?? { reachable: false, models: [], error: "Could not ask Session Buddy." },
 };
 
 export async function onEvent<T>(name: string, handler: (payload: T) => void) {

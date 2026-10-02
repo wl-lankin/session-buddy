@@ -29,7 +29,12 @@ pub struct Settings {
     pub chat_enabled: bool,
     /// The chat process stops after this many idle minutes, 0 = never.
     pub chat_idle_minutes: u32,
+    /// "claude" or "ollama".
+    pub chat_provider: String,
+    /// Claude alias (haiku, sonnet, opus) or a full model id.
     pub chat_model: String,
+    pub chat_ollama_model: String,
+    pub chat_ollama_url: String,
     /// Empty = look for the `claude` CLI in the usual places.
     pub chat_claude_path: String,
 }
@@ -51,7 +56,10 @@ impl Default for Settings {
             finish_min_seconds: 60.0,
             chat_enabled: false,
             chat_idle_minutes: 10,
+            chat_provider: "claude".into(),
             chat_model: "haiku".into(),
+            chat_ollama_model: String::new(),
+            chat_ollama_url: "http://localhost:11434".into(),
             chat_claude_path: String::new(),
         }
     }
@@ -93,9 +101,15 @@ mod tests {
         assert_eq!(s.chat_idle_minutes, 10);
         assert_eq!(s.chat_model, "haiku");
         assert_eq!(s.chat_claude_path, "");
+        assert_eq!(s.chat_provider, "claude");
+        assert_eq!(s.chat_ollama_model, "");
+        assert_eq!(s.chat_ollama_url, "http://localhost:11434");
         let v = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(v["chatEnabled"], false);
         assert_eq!(v["chatIdleMinutes"], 10);
         assert_eq!(v["chatClaudePath"], "");
+        assert_eq!(v["chatProvider"], "claude");
+        assert_eq!(v["chatOllamaModel"], "");
+        assert_eq!(v["chatOllamaUrl"], "http://localhost:11434");
     }
 }

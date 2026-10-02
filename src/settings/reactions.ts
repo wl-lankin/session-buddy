@@ -5,6 +5,7 @@ import type { BotEmoteName, BotStateName } from "../core/layout";
 export type SettingsEvent =
   | { kind: "sound"; on: boolean }
   | { kind: "chat"; on: boolean }
+  | { kind: "ollama"; ok: boolean }
   | { kind: "install"; install: boolean; ok: boolean };
 
 export interface Reaction {
@@ -20,6 +21,8 @@ export function reactionFor(ev: SettingsEvent): Reaction | null {
       return ev.on ? { emote: "yawn" } : null;
     case "chat":
       return { emote: ev.on ? "wink" : "yawn" };
+    case "ollama":
+      return ev.ok ? { emote: "happy" } : { state: "error", holdMs: 2600 };
     case "install":
       if (!ev.ok) return { state: "error", holdMs: 2600 };
       return ev.install ? { emote: "proud", holdMs: 2200 } : { emote: "annoyed" };

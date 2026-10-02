@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeNumber, secondsLabel } from "./helpers";
+import { DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, secondsLabel } from "./helpers";
 
 describe("normalizeNumber", () => {
   it("rounds fractional input when integer", () => {
@@ -33,5 +33,26 @@ describe("secondsLabel", () => {
     expect(secondsLabel(0)).toBe("Immediately");
     expect(secondsLabel(1)).toBe("seconds");
     expect(secondsLabel(15)).toBe("seconds");
+  });
+});
+
+describe("normalizeOllamaUrl", () => {
+  it("falls back to the default for empty input", () => {
+    expect(normalizeOllamaUrl("  ")).toBe(DEFAULT_OLLAMA_URL);
+  });
+  it("adds a scheme and drops trailing slashes", () => {
+    expect(normalizeOllamaUrl("nas.local:11434//")).toBe("http://nas.local:11434");
+    expect(normalizeOllamaUrl("https://ollama.example/")).toBe("https://ollama.example");
+  });
+});
+
+describe("ollamaTestText", () => {
+  it("counts the models of a reachable server", () => {
+    expect(ollamaTestText(true, 1, "http://x")).toBe("Reachable - 1 model");
+    expect(ollamaTestText(true, 3, "http://x")).toBe("Reachable - 3 models");
+    expect(ollamaTestText(true, 0, "http://x")).toContain("no models");
+  });
+  it("names the address of an unreachable one", () => {
+    expect(ollamaTestText(false, 0, "http://localhost:11434")).toBe("Ollama is not reachable at http://localhost:11434 - start it with `ollama serve`");
   });
 });

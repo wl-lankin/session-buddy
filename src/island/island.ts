@@ -176,6 +176,8 @@ export class Island {
         stop: () => this.chat.stop(),
         reset: () => this.chat.reset(),
         setEnabled: (on) => this.chat.setEnabled(on),
+        setModel: (patch) => this.chat.setModel(patch),
+        models: () => this.chat.models(),
         typing: (on) => this.chat.typing(on),
       },
       toggleRecent: () => {

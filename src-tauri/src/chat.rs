@@ -8,16 +8,114 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::island::WINDOW_LABEL;
+use crate::settings::Settings;
 use crate::{log, Shared};
 
 const STYLE_PROMPT: &str = "You are Buddy, a small chat helper inside the Session Buddy desktop app. \
 Answer briefly and plainly, in the language the user writes in. Use Markdown sparingly. \
 Search the web only when it helps. A message may start with a block describing one of the user's Claude Code sessions; use it as context.";
+
+const OLLAMA_STYLE_PROMPT: &str = "You are Buddy, a small chat helper inside the Session Buddy desktop app. \
+Answer briefly and plainly, in the language the user writes in. Use Markdown sparingly. \
+A message may start with a block describing one of the user's Claude Code sessions; use it as context.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Claude,
+    Ollama,
+}
+
+/// What to start for one settings snapshot (the binary is resolved separately).
+#[derive(Debug, PartialEq)]
+struct Launch {
+    provider: Provider,
+    model: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+fn provider_of(s: &Settings) -> Result<Provider, String> {
+    match s.chat_provider.as_str() {
+        "claude" => Ok(Provider::Claude),
+        "ollama" => Ok(Provider::Ollama),
+        _ => Err("Unknown chat provider".into()),
+    }
+}
+
+fn valid_model(name: &str) -> bool {
+    !name.is_empty() && name.chars().count() <= 100 && name.chars().all(|c| c.is_ascii_alphanumeric() || "._:/@-".contains(c))
+}
+
+/// Returns the URL without a trailing slash, or a message saying what is wrong. Never echoes the input.
+fn clean_url(raw: &str) -> Result<String, String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("The Ollama address is not valid".into());
+    }
+    let url = reqwest::Url::parse(raw).map_err(|_| "The Ollama address is not valid")?;
+    let ok = matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some_and(|h| !h.is_empty())
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none();
+    if !ok {
+        return Err("The Ollama address must look like http://localhost:11434".into());
+    }
+    Ok(raw.trim_end_matches('/').to_string())
+}
+
+fn launch(s: &Settings) -> Result<Launch, String> {
+    let provider = provider_of(s)?;
+    let strings = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+    let mut args = strings(&["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
+    let mut env = vec![("SB_CHAT".to_string(), "1".to_string())];
+    let model = match provider {
+        Provider::Claude => {
+            if !valid_model(&s.chat_model) {
+                return Err("The chat model name is not valid".into());
+            }
+            args.extend(strings(&["--model", &s.chat_model, "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch"]));
+            args.extend(strings(&["--no-session-persistence", "--strict-mcp-config", "--append-system-prompt", STYLE_PROMPT]));
+            s.chat_model.clone()
+        }
+        Provider::Ollama => {
+            if s.chat_ollama_model.is_empty() {
+                return Err("Choose an Ollama model in Settings".into());
+            }
+            if !valid_model(&s.chat_ollama_model) {
+                return Err("The Ollama model name is not valid".into());
+            }
+            let url = clean_url(&s.chat_ollama_url)?;
+            args.extend(strings(&["--model", &s.chat_ollama_model, "--tools", "", "--no-session-persistence", "--strict-mcp-config"]));
+            args.extend(strings(&["--append-system-prompt", OLLAMA_STYLE_PROMPT]));
+            for (k, v) in [
+                ("ANTHROPIC_BASE_URL", url.as_str()),
+                ("ANTHROPIC_AUTH_TOKEN", "ollama"),
+                ("ANTHROPIC_API_KEY", ""),
+                ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
+            ] {
+                env.push((k.to_string(), v.to_string()));
+            }
+            s.chat_ollama_model.clone()
+        }
+    };
+    Ok(Launch { provider, model, args, env })
+}
+
+/// True when a running chat process was started with settings that no longer match.
+pub fn restart_needed(old: &Settings, new: &Settings) -> bool {
+    old.chat_provider != new.chat_provider
+        || old.chat_model != new.chat_model
+        || old.chat_ollama_model != new.chat_ollama_model
+        || old.chat_ollama_url != new.chat_ollama_url
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -84,6 +182,9 @@ pub struct ChatStatus {
     claude_found: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    provider: Provider,
+    model: String,
+    web_search: bool,
 }
 
 /// Turns the CLI's stream-json lines of one turn into chat events. Pure: no I/O.
@@ -337,20 +438,17 @@ fn stop_locked(app: &AppHandle, inner: &mut Inner, state: State, detail: Option<
     set_state(app, inner, state, detail);
 }
 
-fn settings_of(app: &AppHandle) -> (bool, u32, String, String) {
-    let s = app.state::<Shared>().settings.lock().unwrap().clone();
-    (s.chat_enabled, s.chat_idle_minutes, s.chat_model, s.chat_claude_path)
+fn settings_of(app: &AppHandle) -> Settings {
+    app.state::<Shared>().settings.lock().unwrap().clone()
 }
 
-fn spawn(app: &AppHandle, inner: &mut Inner, bin: &Path, model: &str) -> Result<(), String> {
+fn spawn(app: &AppHandle, inner: &mut Inner, bin: &Path, launch: &Launch) -> Result<(), String> {
     let dir = sb_common::config_dir().join("chat");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Chat folder: {e}"))?;
     let mut cmd = Command::new(bin);
-    cmd.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages"])
-        .args(["--model", model, "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--no-session-persistence", "--strict-mcp-config"])
-        .args(["--append-system-prompt", STYLE_PROMPT])
+    cmd.args(&launch.args)
+        .envs(launch.env.iter().map(|(k, v)| (k, v)))
         .current_dir(dir)
-        .env("SB_CHAT", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -444,7 +542,7 @@ fn read_loop(app: AppHandle, stdout: std::process::ChildStdout, gen: u64) {
 fn idle_loop(app: AppHandle, gen: u64) {
     loop {
         std::thread::sleep(Duration::from_secs(2));
-        let minutes = settings_of(&app).1;
+        let minutes = settings_of(&app).chat_idle_minutes;
         let chat = app.state::<Chat>();
         let mut inner = chat.0.lock().unwrap();
         if inner.gen != gen {
@@ -458,7 +556,7 @@ fn idle_loop(app: AppHandle, gen: u64) {
     }
 }
 
-fn ensure_running(app: &AppHandle, inner: &mut Inner, bin: &Option<PathBuf>, model: &str) -> Result<(), String> {
+fn ensure_running(app: &AppHandle, inner: &mut Inner, bin: &Option<PathBuf>, launch: &Launch) -> Result<(), String> {
     if inner.proc.is_some() {
         return Ok(());
     }
@@ -467,22 +565,23 @@ fn ensure_running(app: &AppHandle, inner: &mut Inner, bin: &Option<PathBuf>, mod
         set_state(app, inner, State::Error, Some(msg.clone()));
         return Err(msg);
     };
-    spawn(app, inner, bin, model).inspect_err(|e| set_state(app, inner, State::Error, Some(e.clone())))
+    spawn(app, inner, bin, launch).inspect_err(|e| set_state(app, inner, State::Error, Some(e.clone())))
 }
 
 fn send_blocking(app: &AppHandle, text: String) -> Result<(), String> {
-    let (enabled, _, model, path) = settings_of(app);
-    if !enabled {
+    let settings = settings_of(app);
+    if !settings.chat_enabled {
         return Err("Chat is turned off".into());
     }
+    let launch = launch(&settings)?;
     let running = app.state::<Chat>().0.lock().unwrap().proc.is_some();
-    let bin = if running { None } else { resolve(&path) };
+    let bin = if running { None } else { resolve(&settings.chat_claude_path) };
     let chat = app.state::<Chat>();
     let mut inner = chat.0.lock().unwrap();
     if inner.state == State::Busy {
         return Err("Chat is busy".into());
     }
-    ensure_running(app, &mut inner, &bin, &model)?;
+    ensure_running(app, &mut inner, &bin, &launch)?;
     inner.turns += 1;
     let id = format!("t{}", inner.turns);
     inner.turn = Some(id.clone());
@@ -502,14 +601,15 @@ fn send_blocking(app: &AppHandle, text: String) -> Result<(), String> {
 }
 
 fn wake_blocking(app: &AppHandle) {
-    let (enabled, _, model, path) = settings_of(app);
-    if !enabled || app.state::<Chat>().0.lock().unwrap().proc.is_some() {
+    let settings = settings_of(app);
+    if !settings.chat_enabled || app.state::<Chat>().0.lock().unwrap().proc.is_some() {
         return;
     }
-    let bin = resolve(&path);
+    let Ok(launch) = launch(&settings) else { return };
+    let bin = resolve(&settings.chat_claude_path);
     let chat = app.state::<Chat>();
     let mut inner = chat.0.lock().unwrap();
-    let _ = ensure_running(app, &mut inner, &bin, &model);
+    let _ = ensure_running(app, &mut inner, &bin, &launch);
 }
 
 #[tauri::command]
@@ -548,18 +648,78 @@ pub fn chat_reset(app: AppHandle) {
     stop_locked(&app, &mut inner, State::Off, None);
 }
 
+fn status_of(s: &Settings, state: State, detail: Option<String>, claude_found: bool) -> ChatStatus {
+    let provider = provider_of(s).unwrap_or(Provider::Claude);
+    let model = if provider == Provider::Ollama { s.chat_ollama_model.clone() } else { s.chat_model.clone() };
+    let (state, detail) = if s.chat_enabled { (state, detail) } else { (State::Off, None) };
+    ChatStatus { enabled: s.chat_enabled, state, claude_found, detail, provider, model, web_search: provider == Provider::Claude }
+}
+
 #[tauri::command]
 pub async fn chat_status(app: AppHandle) -> ChatStatus {
     tauri::async_runtime::spawn_blocking(move || {
-        let (enabled, _, _, path) = settings_of(&app);
-        let claude_found = resolve(&path).is_some();
+        let s = settings_of(&app);
+        let claude_found = resolve(&s.chat_claude_path).is_some();
         let chat = app.state::<Chat>();
         let inner = chat.0.lock().unwrap();
-        let (state, detail) = if enabled { (inner.state, inner.detail.clone()) } else { (State::Off, None) };
-        ChatStatus { enabled, state, claude_found, detail }
+        status_of(&s, inner.state, inner.detail.clone(), claude_found)
     })
     .await
-    .unwrap_or(ChatStatus { enabled: false, state: State::Off, claude_found: false, detail: None })
+    .unwrap_or_else(|_| status_of(&Settings::default(), State::Off, None, false))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaModels {
+    reachable: bool,
+    models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Tags {
+    models: Vec<TagModel>,
+}
+
+#[derive(Deserialize)]
+struct TagModel {
+    name: String,
+}
+
+fn parse_tags(body: &[u8]) -> Option<Vec<String>> {
+    let tags: Tags = serde_json::from_slice(body).ok()?;
+    let mut names: Vec<String> = tags.models.into_iter().map(|m| m.name).filter(|n| !n.is_empty()).collect();
+    names.sort();
+    names.dedup();
+    Some(names)
+}
+
+async fn fetch_models(base: &str) -> OllamaModels {
+    let fail = |error: String| OllamaModels { reachable: false, models: Vec::new(), error: Some(error) };
+    let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(2)).build() else {
+        return fail("Could not check Ollama".into());
+    };
+    let Ok(resp) = client.get(format!("{base}/api/tags")).send().await else {
+        return fail(format!("Ollama is not reachable at {base}"));
+    };
+    let unexpected = || fail("Unexpected answer from Ollama".into());
+    if !resp.status().is_success() {
+        return unexpected();
+    }
+    match resp.bytes().await.ok().and_then(|b| parse_tags(&b)) {
+        Some(models) => OllamaModels { reachable: true, models, error: None },
+        None => unexpected(),
+    }
+}
+
+#[tauri::command]
+pub async fn chat_models(app: AppHandle, url: Option<String>) -> OllamaModels {
+    let raw = url.unwrap_or_else(|| settings_of(&app).chat_ollama_url);
+    match clean_url(&raw) {
+        Ok(base) => fetch_models(&base).await,
+        Err(error) => OllamaModels { reachable: false, models: Vec::new(), error: Some(error) },
+    }
 }
 
 /// Stops the process at once (chat turned off, app exit).
@@ -708,5 +868,123 @@ mod tests {
         assert_eq!(host("https://example.com/a?b=c"), "example.com");
         assert_eq!(host("http://[::1]:8080/x"), "::1");
         assert_eq!(host("example.com/path"), "example.com");
+    }
+
+    fn ollama(model: &str, url: &str) -> Settings {
+        Settings { chat_provider: "ollama".into(), chat_ollama_model: model.into(), chat_ollama_url: url.into(), ..Settings::default() }
+    }
+
+    fn after<'a>(args: &'a [String], flag: &str) -> &'a str {
+        let i = args.iter().position(|a| a == flag).unwrap();
+        &args[i + 1]
+    }
+
+    #[test]
+    fn claude_launch_keeps_the_web_tools() {
+        let l = launch(&Settings::default()).unwrap();
+        assert_eq!(l.provider, Provider::Claude);
+        assert_eq!(l.model, "haiku");
+        assert_eq!(after(&l.args, "--model"), "haiku");
+        assert_eq!(after(&l.args, "--tools"), "WebSearch,WebFetch");
+        assert_eq!(after(&l.args, "--allowedTools"), "WebSearch,WebFetch");
+        assert_eq!(after(&l.args, "--append-system-prompt"), STYLE_PROMPT);
+        assert_eq!(l.env, vec![("SB_CHAT".to_string(), "1".to_string())]);
+    }
+
+    #[test]
+    fn ollama_launch_points_the_cli_at_ollama_without_tools() {
+        let l = launch(&ollama("qwen2.5:7b", "http://localhost:11434/")).unwrap();
+        assert_eq!(l.provider, Provider::Ollama);
+        assert_eq!(l.model, "qwen2.5:7b");
+        assert_eq!(after(&l.args, "--model"), "qwen2.5:7b");
+        assert_eq!(after(&l.args, "--tools"), "");
+        assert!(!l.args.iter().any(|a| a == "--allowedTools"));
+        assert!(l.args.iter().any(|a| a == "--no-session-persistence") && l.args.iter().any(|a| a == "--strict-mcp-config"));
+        assert!(!after(&l.args, "--append-system-prompt").to_lowercase().contains("web"));
+        let env = |k: &str| l.env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(env("ANTHROPIC_BASE_URL"), Some("http://localhost:11434"));
+        assert_eq!(env("ANTHROPIC_AUTH_TOKEN"), Some("ollama"));
+        assert_eq!(env("ANTHROPIC_API_KEY"), Some(""));
+        assert_eq!(env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"), Some("1"));
+        assert_eq!(env("SB_CHAT"), Some("1"));
+    }
+
+    #[test]
+    fn invalid_settings_do_not_launch() {
+        assert_eq!(launch(&ollama("", "http://localhost:11434")).unwrap_err(), "Choose an Ollama model in Settings");
+        assert!(launch(&ollama("a b", "http://localhost:11434")).is_err());
+        assert!(launch(&ollama("m", "ftp://localhost")).is_err());
+        assert!(launch(&Settings { chat_provider: "x".into(), ..Settings::default() }).is_err());
+        assert!(launch(&Settings { chat_model: String::new(), ..Settings::default() }).is_err());
+        assert!(launch(&Settings { chat_model: "sonnet; rm".into(), ..Settings::default() }).is_err());
+        assert!(launch(&Settings { chat_model: "a".repeat(101), ..Settings::default() }).is_err());
+        assert!(launch(&Settings { chat_model: "claude-sonnet-4-5@20250929".into(), ..Settings::default() }).is_ok());
+        assert!(launch(&Settings { chat_model: "a".repeat(100), ..Settings::default() }).is_ok());
+        assert!(launch(&ollama("hf.co/org/model:Q4_K_M", "http://localhost:11434")).is_ok());
+    }
+
+    #[test]
+    fn url_rule() {
+        assert_eq!(clean_url("http://localhost:11434/").unwrap(), "http://localhost:11434");
+        assert_eq!(clean_url(" https://10.0.0.5:8080 ").unwrap(), "https://10.0.0.5:8080");
+        assert_eq!(clean_url("http://[::1]:11434").unwrap(), "http://[::1]:11434");
+        for bad in ["", "localhost:11434", "file:///etc/passwd", "http://", "http://u:p@h", "http://u@h", "http://a b", "http://h/\nx", "http://h?x=1", "http://h/#f", "javascript:alert(1)"] {
+            assert!(clean_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn tags_are_parsed_and_sorted() {
+        let body = br#"{"models":[{"name":"qwen2.5:7b","size":1},{"name":"gemma2:9b"},{"name":"qwen2.5:7b"}]}"#;
+        assert_eq!(parse_tags(body), Some(vec!["gemma2:9b".to_string(), "qwen2.5:7b".to_string()]));
+        assert_eq!(parse_tags(br#"{"models":[]}"#), Some(vec![]));
+        assert_eq!(parse_tags(b"<html>"), None);
+        assert_eq!(parse_tags(br#"{"nope":1}"#), None);
+    }
+
+    #[test]
+    fn restart_only_for_relevant_changes() {
+        let base = Settings::default();
+        assert!(!restart_needed(&base, &Settings { chat_idle_minutes: 3, chat_enabled: true, ..Settings::default() }));
+        assert!(restart_needed(&base, &Settings { chat_provider: "ollama".into(), ..Settings::default() }));
+        assert!(restart_needed(&base, &Settings { chat_model: "opus".into(), ..Settings::default() }));
+        assert!(restart_needed(&base, &Settings { chat_ollama_model: "m".into(), ..Settings::default() }));
+        assert!(restart_needed(&base, &Settings { chat_ollama_url: "http://h:1".into(), ..Settings::default() }));
+    }
+
+    #[test]
+    fn status_reports_provider_model_and_web_search() {
+        let s = status_of(&Settings { chat_enabled: true, ..Settings::default() }, State::Ready, None, true);
+        let v = serde_json::to_value(s).unwrap();
+        assert_eq!((v["provider"].as_str(), v["model"].as_str(), v["webSearch"].as_bool()), (Some("claude"), Some("haiku"), Some(true)));
+        let s = status_of(&ollama("gemma2:9b", "http://localhost:11434"), State::Ready, None, true);
+        let v = serde_json::to_value(s).unwrap();
+        assert_eq!((v["provider"].as_str(), v["model"].as_str(), v["webSearch"].as_bool()), (Some("ollama"), Some("gemma2:9b"), Some(false)));
+        assert_eq!(v["state"], "off");
+    }
+
+    /// Needs a running Ollama with qwen2.5:7b and the claude CLI: `cargo test -p session-buddy e2e_ollama -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn e2e_ollama_reply() {
+        let l = launch(&ollama("qwen2.5:7b", "http://localhost:11434")).unwrap();
+        let mut cmd = Command::new("claude");
+        cmd.args(&l.args).envs(l.env.iter().map(|(k, v)| (k, v))).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        let mut child = cmd.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        writeln!(stdin, "{}", json!({"type": "user", "message": {"role": "user", "content": "Say hi in one word."}})).unwrap();
+        let mut m = Mapper::new("e");
+        let mut done = None;
+        for line in BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+            if let Some(ChatEvent::Done { text, .. }) = m.map(&line).into_iter().find(|e| matches!(e, ChatEvent::Done { .. })) {
+                done = Some(text);
+                break;
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let text = done.expect("no reply");
+        println!("reply: {text}");
+        assert!(!text.is_empty());
     }
 }

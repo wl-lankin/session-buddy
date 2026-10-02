@@ -25,6 +25,7 @@ export const ICONS = {
   // chevron.right
   chevronRight: "M9 5.5 15.5 12 9 18.5",
   pin: "M9 3.8h6M10.2 3.8v6.1L7 14.6h10l-3.2-4.7V3.8M12 14.6v5.8",
+  chevronDown: "M5.5 9 12 15.5 18.5 9",
   chevronUp: "M5.5 15 12 8.5 18.5 15",
   chevronLeft: "M15 5.5 8.5 12 15 18.5",
   // checkmark

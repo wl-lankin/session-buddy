@@ -13,7 +13,7 @@ const session = (p: Partial<Session> = {}): Session => ({
 });
 
 const on = (m = initialChat()): ChatModel => reduceChat(reduceChat(m, { type: "enabled", on: true, at: 1 }), {
-  type: "status", status: { enabled: true, state: "ready", claudeFound: true }, at: 1,
+  type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: 1,
 });
 const ev = (m: ChatModel, event: ChatEvent, viewing = true, at = 10): ChatModel => reduceChat(m, { type: "event", event, at, viewing });
 const run = (m: ChatModel, ...actions: ChatAction[]): ChatModel => actions.reduce(reduceChat, m);
@@ -165,7 +165,7 @@ describe("reduceChat dividers and status", () => {
   });
 
   it("chat_status sets enabled and whether the CLI exists", () => {
-    const m = reduceChat(initialChat(), { type: "status", status: { enabled: true, state: "off", claudeFound: false }, at: 1 });
+    const m = reduceChat(initialChat(), { type: "status", status: { enabled: true, state: "off", claudeFound: false, provider: "claude", model: "haiku", webSearch: true }, at: 1 });
     expect(m.enabled).toBe(true);
     expect(m.claudeFound).toBe(false);
     expect(canSend(m)).toBe(false);

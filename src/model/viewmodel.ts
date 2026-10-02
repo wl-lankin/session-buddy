@@ -20,9 +20,12 @@ export function loudest(sessions: Session[]): Session | null {
 
 export interface Summary { total: number; busy: number; needsYou: number }
 
-/** Counts the Claude Code sessions actually running: recent ones from transcripts and stale ones are left out. */
+/**
+ * Counts the Claude Code sessions actually running. Recent ones from transcripts are left out; a quiet
+ * ("stale") one still counts: its process runs and its tab is open, a dead process leaves the list by itself.
+ */
 export function summarize(sessions: Session[]): Summary {
-  const counted = sessions.filter((s) => s.live && s.status !== "stale");
+  const counted = sessions.filter((s) => s.live);
   return {
     total: counted.length,
     busy: counted.filter((s) => s.status === "working" || s.status === "thinking").length,

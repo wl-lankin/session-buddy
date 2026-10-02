@@ -37,13 +37,13 @@ describe("viewmodel", () => {
     expect(stripLabel(summarize(four))).toBe("4 sessions · 2 working · 1 needs you");
   });
 
-  it("strip counts only live sessions that are not stale", () => {
+  it("strip counts every live session, quiet ones too, but not recent ones from transcripts", () => {
     const sessions = [
       mk({ status: "working" }), mk(), mk({ status: "stale" }),
       mk({ live: false }), mk({ live: false, status: "stale" }), mk({ status: "thinking" }),
     ];
-    expect(summarize(sessions)).toEqual({ total: 3, busy: 2, needsYou: 0 });
-    expect(stripLabel(summarize(sessions))).toBe("3 sessions · 2 working");
+    expect(summarize(sessions)).toEqual({ total: 4, busy: 2, needsYou: 0 });
+    expect(stripLabel(summarize(sessions))).toBe("4 sessions · 2 working");
     expect(stripLabel(summarize([mk({ live: false }), mk({ live: false })]))).toBe("No sessions");
     expect(recentClass(mk({ live: false }))).toBe(" recent");
     expect(recentClass(mk())).toBe("");

@@ -18,7 +18,7 @@ const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "
 // &ollama=down|empty picks the fake Ollama server's answer for the Test button.
 // &roots=2 lists two project folders in the Control block.
 const DEMO_ROOTS = new URLSearchParams(location.search).get("roots") === "2" ? ["/Users/alex/Projects", "/Users/alex/Work/client-sites"] : [];
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.9" };
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.10" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,
@@ -440,5 +440,15 @@ async function main() {
   }
 }
 
+function showFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  void Bridge.log(`settings page: ${message}`);
+  const app = document.getElementById("app");
+  if (app && !app.childElementCount) app.append(h("p", { class: "load-error", text: `The settings could not load: ${message}` }));
+}
+
+window.addEventListener("error", (e) => showFailure(e.error ?? e.message));
+window.addEventListener("unhandledrejection", (e) => showFailure(e.reason));
+
 installNoBrowser();
-void main();
+main().catch(showFailure);

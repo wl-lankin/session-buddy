@@ -57,8 +57,8 @@ fn start_schema() -> Value {
 
 fn send_schema() -> Value {
     json!({"type": "object", "properties": {
-        "session_id": string("Id of a background session started by Session Buddy"),
-        "text": string("The prompt, at most 4000 characters"),
+        "session_id": string("Id of a running session (list_sessions)"),
+        "text": string("The prompt or message, at most 4000 characters"),
     }, "required": ["session_id", "text"], "additionalProperties": false})
 }
 
@@ -79,7 +79,7 @@ const TOOLS: [Tool; 7] = [
     Tool { name: "get_session", description: "One session in detail: the above plus its last steps and, for background sessions, their recent output.", schema: get_session_schema, action: false },
     Tool { name: "list_projects", description: "The project folders the user allows sessions in: name and path.", schema: no_args, action: false },
     Tool { name: "start_session", description: "Start a background Claude Code session in a project folder. The user confirms in the island first.", schema: start_schema, action: true },
-    Tool { name: "send_prompt", description: "Send a prompt to a background session that Session Buddy started. The user confirms first.", schema: send_schema, action: true },
+    Tool { name: "send_prompt", description: "Send text to a session. A background session that Session Buddy started takes it as its next prompt; any other running session receives it as a message from the user at its next step, or when it next starts working. The user confirms first.", schema: send_schema, action: true },
     Tool { name: "stop_session", description: "Stop a background session that Session Buddy started. The user confirms first.", schema: stop_schema, action: true },
     Tool { name: "approve", description: "Internal: Claude Code's permission prompt for the action tools. Never call this yourself.", schema: approve_schema, action: true },
 ];

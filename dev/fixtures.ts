@@ -8,7 +8,7 @@ const base = (id: string, project: string, now: number, p: Partial<Session>): Se
   id, project, cwd: `C:\\Projects\\${project}`, branch: null, termProgram: "WarpTerminal", model: "Opus 5.5",
   status: "idle", statusSince: now, lastPrompt: null, lastMessage: null, steps: [], agents: [], background: [],
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: 12, contextTokens: 24_000, contextSize: 200_000, costUsd: 0.2 },
-  pending: [], startedAt: now, lastEventAt: now, pid: null, live: true, plan: null, managed: false, ...p,
+  pending: [], startedAt: now, lastEventAt: now, pid: null, live: true, plan: null, managed: false, messages: [], ...p,
 });
 
 const ACCOUNT = { email: "wolfgang.linz@example-company.de", org: "Example Company GmbH", plan: "Team" };
@@ -45,6 +45,10 @@ export function demoSnapshot(now: number): Snapshot {
     sessions: [
       base("a", "pushdocs", now, {
         branch: "PDD-1981", status: "working", statusSince: now - 252_000, lastPrompt: "fix the DATEV 409 handling",
+        messages: [
+          { id: "m1", text: "Also run the Datev tests with --stop-on-failure", state: "delivered", queuedAt: now - 90_000, deliveredAt: now - 80_000, via: "mid-turn" },
+          { id: "m2", text: "And keep the retry count at three, please", state: "queued", queuedAt: now - 5_000, deliveredAt: null, via: null },
+        ],
         steps: [
           { tool: "Read", label: "Read · DatevClient.php", at: now, ok: true },
           { tool: "Grep", label: "Search · KeyConflictFault", at: now, ok: true },

@@ -10,6 +10,8 @@ pub enum WaitKind {
     Permission,
     Question,
     Reply,
+    /// The app answers at once, with the user's queued messages or nothing.
+    Message,
 }
 
 impl WaitKind {
@@ -18,21 +20,36 @@ impl WaitKind {
             WaitKind::Permission => "permission",
             WaitKind::Question => "question",
             WaitKind::Reply => "reply",
+            WaitKind::Message => "message",
         }
     }
 
     /// A little longer than the app's own deadline, so the app always decides first.
+    /// A message answer is not worth delaying Claude Code for: the same short give-up as the connect.
     pub fn budget(self) -> Duration {
         match self {
+            WaitKind::Message => Duration::from_millis(100),
             WaitKind::Permission => Duration::from_secs(112),
             WaitKind::Question | WaitKind::Reply => Duration::from_secs(545),
         }
     }
 }
 
-/// The three cases where a human can answer from the island. Everything else is fire-and-forget.
+/// The cases where the app answers: a human on the island (permission, question, reply), or at once
+/// with a queued message (tool events and Stop of the main session). Everything else is fire-and-forget.
 pub fn wait_kind(payload: &Value) -> Option<WaitKind> {
-    match payload.get("hook_event_name")?.as_str()? {
+    let event = payload.get("hook_event_name")?.as_str()?;
+    human_wait(event, payload).or_else(|| message_wait(event, payload))
+}
+
+/// A subagent's events never carry the user's message: it is for the main session.
+fn message_wait(event: &str, payload: &Value) -> Option<WaitKind> {
+    let main = payload.get("agent_id").and_then(Value::as_str).is_none_or(str::is_empty);
+    (main && matches!(event, "PreToolUse" | "PostToolUse" | "Stop")).then_some(WaitKind::Message)
+}
+
+fn human_wait(event: &str, payload: &Value) -> Option<WaitKind> {
+    match event {
         // Claude Code ignores a hook "allow" for ExitPlanMode and shows its own plan dialog anyway.
         "PermissionRequest" if payload.get("tool_name").and_then(Value::as_str) == Some("ExitPlanMode") => None,
         "PermissionRequest" => Some(WaitKind::Permission),
@@ -88,6 +105,34 @@ pub fn hook_output(kind: WaitKind, original: &Value, answer: &Value) -> Option<S
             }
             Some(json!({"decision": "block", "reason": text}).to_string())
         }
+        WaitKind::Message => {
+            let texts: Vec<&str> = answer
+                .get("messages")?
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .collect();
+            if texts.is_empty() {
+                return None;
+            }
+            let body = texts.join("\n\n");
+            match original.get("hook_event_name")?.as_str()? {
+                // Context only: no permission decision, so what the user allowed or denied is untouched.
+                event @ ("PreToolUse" | "PostToolUse") => Some(
+                    json!({"hookSpecificOutput": {
+                        "hookEventName": event,
+                        "additionalContext": format!("Message from the user, sent through Session Buddy while you were working: {body}")
+                    }})
+                    .to_string(),
+                ),
+                "Stop" => Some(
+                    json!({"decision": "block", "reason": format!("The user sent this message through Session Buddy: {body}")}).to_string(),
+                ),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -106,7 +151,7 @@ mod tests {
             wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"})),
             Some(WaitKind::Question)
         );
-        assert_eq!(wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"Bash"})), None);
+        assert_eq!(wait_kind(&json!({"hook_event_name":"PreToolUse","tool_name":"Bash"})), Some(WaitKind::Message));
         assert_eq!(
             wait_kind(&json!({"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Shall I push it?"})),
             Some(WaitKind::Reply)
@@ -116,13 +161,29 @@ mod tests {
             wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"**Want me to continue?**\n\n"})),
             Some(WaitKind::Reply)
         );
+        // A Stop that is no question, or follows an earlier block, can still carry a queued message.
         assert_eq!(
             wait_kind(&json!({"hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"Again?"})),
-            None
+            Some(WaitKind::Message)
         );
-        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"Done."})), None);
-        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop"})), None);
-        assert_eq!(wait_kind(&json!({"hook_event_name":"SessionStart"})), None);
+        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop","last_assistant_message":"Done."})), Some(WaitKind::Message));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"Stop"})), Some(WaitKind::Message));
+        assert_eq!(wait_kind(&json!({"hook_event_name":"PostToolUse","tool_name":"Read"})), Some(WaitKind::Message));
+        for event in ["SessionStart", "UserPromptSubmit", "Notification", "SubagentStop", "PostToolUseFailure"] {
+            assert_eq!(wait_kind(&json!({"hook_event_name": event})), None, "{event}");
+        }
+    }
+
+    #[test]
+    fn a_subagent_event_never_waits_for_a_message() {
+        for event in ["PreToolUse", "PostToolUse", "Stop"] {
+            assert_eq!(wait_kind(&json!({"hook_event_name": event, "agent_id": "a1", "tool_name": "Read"})), None, "{event}");
+        }
+        // ...but its permission request and its question still reach the user.
+        assert_eq!(
+            wait_kind(&json!({"hook_event_name":"PermissionRequest","agent_id":"a1","tool_name":"Bash"})),
+            Some(WaitKind::Permission)
+        );
     }
 
     #[test]
@@ -140,6 +201,7 @@ mod tests {
         assert_eq!(WaitKind::Permission.budget(), Duration::from_secs(112));
         assert_eq!(WaitKind::Question.budget(), Duration::from_secs(545));
         assert_eq!(WaitKind::Reply.budget(), Duration::from_secs(545));
+        assert_eq!(WaitKind::Message.budget(), Duration::from_millis(100));
     }
 
     #[test]
@@ -182,5 +244,50 @@ mod tests {
         let out = hook_output(WaitKind::Reply, &json!({}), &json!({"reply":"  yes, push it  "})).unwrap();
         assert_eq!(parse(&out), json!({"decision":"block","reason":"yes, push it"}));
         assert!(hook_output(WaitKind::Reply, &json!({}), &json!({"reply":"   "})).is_none());
+    }
+
+    fn messages(texts: &[&str]) -> Value {
+        json!({"messages": texts})
+    }
+
+    #[test]
+    fn pre_and_post_tool_use_get_additional_context_and_no_decision() {
+        for event in ["PreToolUse", "PostToolUse"] {
+            let original = json!({"hook_event_name": event, "tool_name": "Bash"});
+            let out = hook_output(WaitKind::Message, &original, &messages(&["use tabs"])).unwrap();
+            assert_eq!(
+                parse(&out),
+                json!({"hookSpecificOutput":{"hookEventName": event, "additionalContext":
+                    "Message from the user, sent through Session Buddy while you were working: use tabs"}})
+            );
+            assert!(parse(&out)["hookSpecificOutput"].get("permissionDecision").is_none());
+        }
+    }
+
+    #[test]
+    fn stop_blocks_with_the_wrapped_message() {
+        let original = json!({"hook_event_name": "Stop"});
+        let out = hook_output(WaitKind::Message, &original, &messages(&["one more thing"])).unwrap();
+        assert_eq!(
+            parse(&out),
+            json!({"decision":"block","reason":"The user sent this message through Session Buddy: one more thing"})
+        );
+    }
+
+    #[test]
+    fn several_messages_join_with_a_blank_line() {
+        let original = json!({"hook_event_name": "PreToolUse"});
+        let out = parse(&hook_output(WaitKind::Message, &original, &messages(&["first", "  second\nline  "])).unwrap());
+        assert!(out["hookSpecificOutput"]["additionalContext"].as_str().unwrap().ends_with(": first\n\nsecond\nline"));
+    }
+
+    #[test]
+    fn no_message_prints_nothing() {
+        let original = json!({"hook_event_name": "PreToolUse"});
+        assert!(hook_output(WaitKind::Message, &original, &messages(&[])).is_none());
+        assert!(hook_output(WaitKind::Message, &original, &messages(&["  "])).is_none());
+        assert!(hook_output(WaitKind::Message, &original, &json!({})).is_none());
+        assert!(hook_output(WaitKind::Message, &json!({"hook_event_name": "Notification"}), &messages(&["x"])).is_none());
+        assert!(hook_output(WaitKind::Message, &json!({}), &messages(&["x"])).is_none());
     }
 }

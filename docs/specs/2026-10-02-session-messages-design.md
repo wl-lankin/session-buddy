@@ -31,10 +31,10 @@ The same queue serves the chat: its `send_prompt` tool, for a session that is no
 
 ## Rust
 
-- Store/hub: per-session queue, delivery bookkeeping, snapshot field `messages: { id, text, state, queuedAt, deliveredAt, via }[]` per session (last few only).
-- Relay: wait-for-reply on the three events, JSON output builders per event, unit tests for each shape and for the "app absent" path (prints nothing, exits 0 within the budget).
-- IPC: reply to those events always, immediately; the payload is optional.
-- Command `session_message_send`, `session_message_cancel(id)`.
+- Store (`core/src/messages.rs`, `store.rs`): per-session queue in memory, at most 5 queued, 4000 characters, control characters except newlines removed, ids `m<n>`. Snapshot field `messages` per session, the last 5: `{ id, text, state: queued|delivered|cancelled|expired, queuedAt, deliveredAt, via: "mid-turn"|"stop"|null }`. A session that ends or is removed expires its queued messages and takes them out of the snapshot with it (`Store::expired_messages` keeps them for a while, not shown).
+- Relay: `PreToolUse`, `PostToolUse` and `Stop` of the main session (not subagents) are forwarded with `sb_wait: "message"`; the relay waits at most 100 ms for the app's one-line answer `{"messages": [...]}` and prints `additionalContext` (Pre/Post) or `{"decision":"block","reason":...}` (Stop). Texts of one answer are joined with a blank line and wrapped once. Permission requests, questions and a Stop that asks a question keep their own flow; a queued message waits for the next event.
+- Hub: the answer is built and the messages are marked delivered in one step under the store lock, so none goes out twice; if the answer cannot be written they go back to the queue. A Stop that delivers is not a finish (no finish cue, status back to thinking).
+- Commands: `session_message_send(sessionId, text)` (one command for every session: a managed session takes a direct prompt exactly like `worker_send`, any other session is queued) and `session_message_cancel(sessionId, messageId)`. Errors are plain strings. The chat's `send_prompt` queues the same way for a session that is not managed, after its card.
 
 ## Not now
 

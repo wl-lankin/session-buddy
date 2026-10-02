@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::messages::{self, Message, MessageState, Queue, Via};
 use crate::adopt::{match_processes, Candidate, ClaudeProcess};
 use crate::steps::{approval_target, clip, output_tail, project_name, step_detail, step_label, StepDetail};
 
@@ -13,6 +14,8 @@ pub const MAX_STEPS: usize = 50;
 pub const FINISHED_TO_IDLE_MS: i64 = 30_000;
 pub const DEFAULT_STALE_AFTER_MS: i64 = 10 * 60_000;
 pub const DEFAULT_REMOVE_AFTER_MS: i64 = 2 * 60 * 60_000;
+/// How many ended sessions keep their messages for `expired_messages`.
+const ENDED_SESSIONS_KEPT: usize = 20;
 const ENDED_AGENT_KEEP_MS: i64 = 10 * 60_000;
 /// While a tool or an agent is running the session may be silent for long; it still goes
 /// stale eventually (e.g. its terminal tab was closed mid-tool), just not before this.
@@ -149,6 +152,9 @@ pub struct Session {
     pub plan: Option<String>,
     /// A background session started by Session Buddy itself: the island may send it prompts and stop it.
     pub managed: bool,
+    /// What the user queued for this session, newest last; only the last few are serialised.
+    #[serde(serialize_with = "messages::serialize_shown")]
+    pub messages: Queue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -190,6 +196,9 @@ pub struct Store {
     pub rate_limits: Option<(Value, i64)>,
     /// Ids of the sessions Session Buddy started; a hook may arrive before or after the id is known.
     managed: HashSet<String>,
+    /// Messages that never reached a session that has ended, newest session last.
+    ended: VecDeque<(String, Vec<Message>)>,
+    message_counter: u64,
 }
 
 impl Default for Store {
@@ -200,6 +209,8 @@ impl Default for Store {
             remove_after_ms: DEFAULT_REMOVE_AFTER_MS,
             rate_limits: None,
             managed: HashSet::new(),
+            ended: VecDeque::new(),
+            message_counter: 0,
         }
     }
 }
@@ -241,6 +252,7 @@ impl Session {
             prompt_at: None,
             plan: None,
             managed: false,
+            messages: Queue::default(),
         }
     }
 
@@ -363,6 +375,83 @@ impl Store {
         }
     }
 
+    /// Removes a session. Its waiting messages are expired and kept for `expired_messages`.
+    fn retire(&mut self, id: &str) -> bool {
+        let Some(mut sess) = self.sessions.remove(id) else { return false };
+        sess.messages.expire();
+        if !sess.messages.0.is_empty() {
+            self.ended.push_back((sess.id, sess.messages.0.into_iter().collect()));
+            while self.ended.len() > ENDED_SESSIONS_KEPT {
+                self.ended.pop_front();
+            }
+        }
+        true
+    }
+
+    fn retire_where(&mut self, gone: impl Fn(&Session) -> bool) -> bool {
+        let ids: Vec<String> = self.sessions.values().filter(|s| gone(s)).map(|s| s.id.clone()).collect();
+        ids.iter().fold(false, |any, id| self.retire(id) | any)
+    }
+
+    /// The messages of a session that has ended, with the undelivered ones expired.
+    pub fn expired_messages(&self, session_id: &str) -> Vec<Message> {
+        self.ended.iter().rev().find(|(id, _)| id == session_id).map(|(_, list)| list.clone()).unwrap_or_default()
+    }
+
+    /// Queues the user's text for a running session. Errors are sentences for the user.
+    pub fn queue_message(&mut self, session_id: &str, text: &str, now: i64) -> Result<Message, String> {
+        let text = messages::clean(text)?;
+        let sess = self.sessions.get_mut(session_id).ok_or("That session is not known any more. It may have ended.")?;
+        if !sess.live {
+            return Err("That session is not running.".into());
+        }
+        self.message_counter += 1;
+        let message = Message { id: format!("m{}", self.message_counter), text, state: MessageState::Queued, queued_at: now, delivered_at: None, via: None };
+        sess.messages.push(message.clone())?;
+        Ok(message)
+    }
+
+    pub fn cancel_message(&mut self, session_id: &str, message_id: &str) -> Result<(), String> {
+        self.sessions.get_mut(session_id).ok_or("That session is not known any more. It may have ended.")?.messages.cancel(message_id)
+    }
+
+    /// Marks the queued messages of a session delivered, once: (id, text) oldest first.
+    fn take_messages(&mut self, session_id: &str, via: Via, now: i64) -> Vec<(String, String)> {
+        self.sessions.get_mut(session_id).map(|s| s.messages.take(via, now)).unwrap_or_default()
+    }
+
+    /// Puts messages back in the queue when their answer could not be written.
+    pub fn restore_messages(&mut self, session_id: &str, ids: &[String]) {
+        if let Some(sess) = self.sessions.get_mut(session_id) {
+            sess.messages.restore(ids);
+        }
+    }
+
+    /// Applies a hook the relay waits on for a message: the queued messages of the session are marked
+    /// delivered here, in the same step that builds the answer, so none is handed out twice. A Stop that
+    /// delivers something is not a finish: the session carries on with the message.
+    pub fn apply_hook_delivering(&mut self, p: &Value, now: i64) -> (Vec<Cue>, Vec<(String, String)>) {
+        let event = s(p, "hook_event_name").unwrap_or_default();
+        let via = match event {
+            "Stop" => Some(Via::Stop),
+            "PreToolUse" | "PostToolUse" => Some(Via::MidTurn),
+            _ => None,
+        };
+        let taken = match (s(p, "session_id"), via) {
+            (Some(id), Some(via)) if s(p, "agent_id").is_none() => self.take_messages(id, via, now),
+            _ => Vec::new(),
+        };
+        if event == "Stop" && !taken.is_empty() {
+            if let Some(sess) = self.touch(p, now) {
+                sess.last_event_at = now;
+                sess.plan = None;
+                sess.set_status(Status::Thinking, now);
+            }
+            return (Vec::new(), taken);
+        }
+        (self.apply_hook(p, now), taken)
+    }
+
     pub fn snapshot(&self) -> Vec<Session> {
         let mut list: Vec<Session> = self.sessions.values().cloned().collect();
         list.sort_by(|a, b| a.started_at.cmp(&b.started_at).then_with(|| a.id.cmp(&b.id)));
@@ -415,7 +504,7 @@ impl Store {
         let event = s(p, "hook_event_name").unwrap_or_default();
         let Some(id) = s(p, "session_id").map(str::to_string) else { return Vec::new() };
         if event == "SessionEnd" {
-            self.sessions.remove(&id);
+            self.retire(&id);
             return Vec::new();
         }
         let Some(sess) = self.touch(p, now) else { return Vec::new() };
@@ -679,12 +768,7 @@ impl Store {
             let busy = s.steps.back().is_some_and(|x| x.ok.is_none()) || s.agents.iter().any(|a| a.running);
             if busy { base.max(BUSY_STALE_AFTER_MS) } else { base }
         };
-        let mut changed = false;
-        self.sessions.retain(|_, s| {
-            let keep = !(s.status == Status::Stale && now - s.last_event_at >= stale_after(s) + remove);
-            changed |= !keep;
-            keep
-        });
+        let mut changed = self.retire_where(|s| s.status == Status::Stale && now - s.last_event_at >= stale_after(s) + remove);
         for s in self.sessions.values_mut() {
             if s.status == Status::Finished && now - s.status_since >= FINISHED_TO_IDLE_MS {
                 s.set_status(Status::Idle, now);
@@ -705,9 +789,7 @@ impl Store {
     /// without a SessionEnd). Sessions still waiting for the user stay: the hub resolves those
     /// when the relay disconnects. Returns true when anything was removed.
     pub fn remove_dead(&mut self, is_alive: impl Fn(u32) -> bool) -> bool {
-        let before = self.sessions.len();
-        self.sessions.retain(|_, s| !s.pending.is_empty() || s.pid.is_none_or(&is_alive));
-        self.sessions.len() != before
+        self.retire_where(|s| s.pending.is_empty() && s.pid.is_some_and(|pid| !is_alive(pid)))
     }
 
     pub fn has_unclaimed_seeds(&self) -> bool {
@@ -1605,5 +1687,131 @@ mod tests {
         st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "<agent-message>x</agent-message>"})), T0 + 90_001);
         st.apply_hook(&ev("Stop", json!({})), T0 + 90_002);
         assert!(agent(&st, "bg").running);
+    }
+
+    fn live_store() -> Store {
+        let mut st = Store::default();
+        st.apply_hook(&ev("SessionStart", json!({})), T0);
+        st
+    }
+
+    #[test]
+    fn queueing_follows_the_rules() {
+        let mut st = live_store();
+        let m = st.queue_message("s1", "  hello\u{7} there\r\nline two  ", T0).unwrap();
+        assert_eq!((m.id.as_str(), m.text.as_str(), m.state), ("m1", "hello there\nline two", MessageState::Queued));
+        assert!(st.queue_message("s1", " \u{1}\n ", T0).is_err());
+        assert!(st.queue_message("s1", &"x".repeat(4001), T0).unwrap_err().contains("4000"));
+        assert!(st.queue_message("s1", &"x".repeat(4000), T0).is_ok());
+        assert!(st.queue_message("nope", "hi", T0).unwrap_err().contains("not known"));
+        for i in 0..3 {
+            st.queue_message("s1", &format!("n{i}"), T0).unwrap();
+        }
+        assert_eq!(sess(&st).messages.queued(), 5);
+        assert!(st.queue_message("s1", "one too many", T0).unwrap_err().contains("5 messages"));
+        st.cancel_message("s1", "m1").unwrap();
+        assert!(st.cancel_message("s1", "m1").is_err(), "already cancelled");
+        assert!(st.cancel_message("s1", "zz").is_err());
+        assert!(st.queue_message("s1", "room again", T0).is_ok());
+    }
+
+    #[test]
+    fn a_seeded_session_that_does_not_run_takes_no_message() {
+        let mut st = Store::default();
+        st.seed(Session::new("old", T0));
+        assert!(st.queue_message("old", "hi", T0).unwrap_err().contains("not running"));
+    }
+
+    #[test]
+    fn a_pre_tool_use_delivers_once_and_marks_mid_turn() {
+        let mut st = live_store();
+        st.queue_message("s1", "first", T0).unwrap();
+        st.queue_message("s1", "second", T0 + 1).unwrap();
+        let (_, taken) = st.apply_hook_delivering(&ev("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "ls"}})), T0 + 50);
+        assert_eq!(taken.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(), ["first", "second"]);
+        let m = &sess(&st).messages.0[0];
+        assert_eq!((m.state, m.delivered_at, m.via), (MessageState::Delivered, Some(T0 + 50), Some(Via::MidTurn)));
+        for event in ["PreToolUse", "PostToolUse", "Stop"] {
+            let (_, again) = st.apply_hook_delivering(&ev(event, json!({"tool_name": "Bash"})), T0 + 60);
+            assert!(again.is_empty(), "{event} must not deliver twice");
+        }
+        assert!(!sess(&st).steps.is_empty(), "the hook was applied as usual");
+    }
+
+    #[test]
+    fn a_stop_delivers_and_does_not_finish_the_turn() {
+        let mut st = live_store();
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0 + 1);
+        st.queue_message("s1", "one more thing", T0 + 2).unwrap();
+        let (cues, taken) = st.apply_hook_delivering(&ev("Stop", json!({"last_assistant_message": "Done."})), T0 + 100);
+        assert!(cues.is_empty());
+        assert_eq!(taken.len(), 1);
+        assert_ne!(sess(&st).status, Status::Finished);
+        assert_eq!(sess(&st).messages.0[0].via, Some(Via::Stop));
+        let (cues, taken) = st.apply_hook_delivering(&ev("Stop", json!({"last_assistant_message": "Done.", "stop_hook_active": true})), T0 + 200);
+        assert!(taken.is_empty());
+        assert_eq!(cues.len(), 1, "an ordinary Stop still finishes");
+        assert_eq!(sess(&st).status, Status::Finished);
+    }
+
+    #[test]
+    fn a_subagent_never_receives_the_message() {
+        let mut st = live_store();
+        st.queue_message("s1", "for the main session", T0).unwrap();
+        let (_, taken) = st.apply_hook_delivering(&ev("PreToolUse", json!({"tool_name": "Read", "agent_id": "a1", "agent_type": "Explore"})), T0 + 1);
+        assert!(taken.is_empty());
+        assert_eq!(sess(&st).messages.queued(), 1);
+    }
+
+    #[test]
+    fn restoring_puts_undelivered_messages_back() {
+        let mut st = live_store();
+        st.queue_message("s1", "hi", T0).unwrap();
+        let (_, taken) = st.apply_hook_delivering(&ev("PostToolUse", json!({"tool_name": "Bash"})), T0 + 1);
+        st.restore_messages("s1", &[taken[0].0.clone()]);
+        let m = &sess(&st).messages.0[0];
+        assert_eq!((m.state, m.delivered_at, m.via), (MessageState::Queued, None, None));
+    }
+
+    #[test]
+    fn messages_expire_when_the_session_ends_or_is_removed() {
+        let mut st = live_store();
+        st.queue_message("s1", "waiting", T0).unwrap();
+        st.queue_message("s1", "sent", T0).unwrap();
+        st.cancel_message("s1", "m2").unwrap();
+        st.apply_hook(&ev("SessionEnd", json!({})), T0 + 1);
+        assert!(st.get("s1").is_none());
+        let list = st.expired_messages("s1");
+        assert_eq!(list.iter().map(|m| (m.text.as_str(), m.state)).collect::<Vec<_>>(), [("waiting", MessageState::Expired), ("sent", MessageState::Cancelled)]);
+
+        let mut st = Store::default();
+        st.apply_hook(&ev("SessionStart", json!({"sb_claude_pid": 9})), T0);
+        st.queue_message("s1", "dead process", T0).unwrap();
+        assert!(st.remove_dead(|_| false));
+        assert_eq!(st.expired_messages("s1")[0].state, MessageState::Expired);
+
+        let mut st = live_store();
+        st.queue_message("s1", "stale", T0).unwrap();
+        st.tick(T0 + st.stale_after_ms + 1);
+        st.tick(T0 + st.stale_after_ms + st.remove_after_ms + 1);
+        assert!(st.get("s1").is_none());
+        assert_eq!(st.expired_messages("s1")[0].state, MessageState::Expired);
+    }
+
+    #[test]
+    fn the_snapshot_shows_the_last_five_in_camel_case() {
+        let mut st = live_store();
+        for i in 0..4 {
+            st.queue_message("s1", &format!("a{i}"), T0).unwrap();
+        }
+        st.apply_hook_delivering(&ev("PreToolUse", json!({"tool_name": "Bash"})), T0 + 7);
+        for i in 0..3 {
+            st.queue_message("s1", &format!("b{i}"), T0 + 8).unwrap();
+        }
+        let v = serde_json::to_value(&st.snapshot()[0]).unwrap();
+        let list = v["messages"].as_array().unwrap();
+        assert_eq!(list.len(), 5);
+        assert_eq!(list[0], json!({"id": "m3", "text": "a2", "state": "delivered", "queuedAt": T0, "deliveredAt": T0 + 7, "via": "mid-turn"}));
+        assert_eq!(list[4], json!({"id": "m7", "text": "b2", "state": "queued", "queuedAt": T0 + 8, "deliveredAt": null, "via": null}));
     }
 }

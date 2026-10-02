@@ -5,7 +5,7 @@
 // 13 s to 19 s. The waiting cards arrive at 30 s; while they wait, finishes
 // only flash and never cover them.
 
-import type { Snapshot } from "../src/core/types";
+import type { SessionMessage as Message, Snapshot } from "../src/core/types";
 import { State } from "../src/core/state";
 import { demoAction, demoChat, demoControlChat, demoManaged, demoSnapshot, demoUsage } from "./fixtures";
 
@@ -96,7 +96,7 @@ const setManaged = (patch: Partial<Snapshot["sessions"][number]>) => {
 };
 
 window.addEventListener("sb-invoke", (e) => {
-  const { cmd, args } = (e as CustomEvent<{ cmd: string; args?: { requestId?: string; answer?: { allow?: boolean }; sessionId?: string } }>).detail;
+  const { cmd, args } = (e as CustomEvent<{ cmd: string; args?: { requestId?: string; answer?: { allow?: boolean }; sessionId?: string; messageId?: string; text?: string } }>).detail;
   console.log("[preview]", cmd, JSON.stringify(args));
   if (cmd === "answer" && args?.requestId && snap.actions.some((a) => a.requestId === args.requestId)) {
     const allowed = args.answer?.allow === true;
@@ -104,9 +104,30 @@ window.addEventListener("sb-invoke", (e) => {
     if (allowed && !snap.sessions.some((s) => s.id === "w1")) snap = { ...snap, sessions: [...snap.sessions, demoManaged(Date.now(), "working")] };
     push();
   }
-  if (cmd === "worker_send") {
+  if (cmd === "session_message_send" && args?.sessionId === "w1") {
     setManaged({ status: "working", statusSince: Date.now() });
     setTimeout(() => setManaged({ status: "idle", statusSince: Date.now(), lastMessage: "Done. I changed the sort order and added a test." }), 4000);
+  } else if (cmd === "session_message_send" && args?.sessionId && !/fail/i.test(String(args.text ?? ""))) {
+    // Queues the text, then flips it to delivered after a moment, as the hooks would.
+    const sessionId = args.sessionId;
+    const id = `fake-${Date.now()}`;
+    const patch = (fn: (m: Message) => Message) => {
+      snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === sessionId ? { ...s, messages: s.messages.map(fn) } : s)) };
+      push();
+    };
+    const queuedAt = Date.now();
+    snap = {
+      ...snap,
+      sessions: snap.sessions.map((s) =>
+        s.id === sessionId ? { ...s, messages: [...s.messages, { id, text: String(args.text ?? ""), state: "queued" as const, queuedAt, deliveredAt: null, via: null }].slice(-5) } : s,
+      ),
+    };
+    push();
+    setTimeout(() => patch((m) => (m.id === id && m.state === "queued" ? { ...m, state: "delivered", deliveredAt: Date.now(), via: "mid-turn" } : m)), 4000);
+  }
+  if (cmd === "session_message_cancel" && args?.sessionId) {
+    snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === args.sessionId ? { ...s, messages: s.messages.map((m) => (m.id === args.messageId && m.state === "queued" ? { ...m, state: "cancelled" as const } : m)) } : s)) };
+    push();
   }
   if (cmd === "worker_stop") {
     snap = { ...snap, sessions: snap.sessions.filter((s) => s.id !== "w1") };

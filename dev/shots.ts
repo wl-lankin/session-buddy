@@ -25,7 +25,7 @@ const base = (id: string, project: string, p: Partial<Session>): Session => ({
   id, project, cwd: `C:\\Code\\${project}`, branch: null, termProgram: "WarpTerminal", model: "Opus 5.5",
   status: "idle", statusSince: NOW, lastPrompt: null, lastMessage: null, steps: [], agents: [], background: [],
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: 14, contextTokens: 28_000, contextSize: 200_000, costUsd: 0.3 },
-  pending: [], startedAt: NOW - 40 * MIN, lastEventAt: NOW, pid: null, live: true, plan: null, managed: false, ...p,
+  pending: [], startedAt: NOW - 40 * MIN, lastEventAt: NOW, pid: null, live: true, plan: null, managed: false, messages: [], ...p,
 });
 
 const USAGE: Usage = {

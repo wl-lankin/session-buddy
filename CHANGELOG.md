@@ -2,6 +2,9 @@
 
 Each release workflow run copies the section of its version into the release text, and the app's update card shows it. Keep the headings as `## <version> - <title>` and write a few plain lines per release: what a user sees, not how it was built.
 
+## 1.0.14 - Long answers in full
+- A long answer of Claude on the reply card and in the session view is no longer cut off after about 2000 characters.
+
 ## 1.0.13 - Notch strip and session count
 - The strip beside the MacBook notch has the right width (the right side was cut off) and no longer grows in small steps.
 - The number of sessions counts quiet sessions too, so it matches the dots and the number of open tabs.

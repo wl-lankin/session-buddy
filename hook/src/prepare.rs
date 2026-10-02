@@ -8,6 +8,8 @@ use crate::output::{wait_kind, WaitKind};
 const MAX_FIELD_LEN: usize = 2_000;
 /// ExitPlanMode's plan is shown on the island, so it may be longer than other fields.
 const MAX_PLAN_LEN: usize = 8_000;
+/// Claude's last message is read in full on the reply card and the session view (same cap as the store).
+const MAX_MESSAGE_LEN: usize = 12_000;
 /// A command's output is only shown by its end ("Tests: 48 passed"): keep that much of each stream.
 const MAX_OUTPUT_TAIL: usize = 1_500;
 
@@ -78,9 +80,13 @@ pub fn prepare(
     } else {
         None
     };
+    let message = fwd.get_mut("last_assistant_message").map(Value::take);
     truncate_strings(&mut fwd);
     if let (Some(Value::String(p)), Some(input)) = (plan, fwd.get_mut("tool_input").and_then(Value::as_object_mut)) {
         input.insert("plan".into(), Value::String(cap(p, MAX_PLAN_LEN)));
+    }
+    if let (Some(Value::String(m)), Some(fields)) = (message, fwd.as_object_mut()) {
+        fields.insert("last_assistant_message".into(), Value::String(cap(m, MAX_MESSAGE_LEN)));
     }
 
     let mut line = fwd.to_string();
@@ -192,6 +198,17 @@ mod tests {
         let forwarded = fwd(&p)["tool_input"]["questions"][0]["question"].as_str().unwrap().to_string();
         assert!(forwarded.chars().count() <= MAX_FIELD_LEN + 1);
         assert_eq!(p.original["tool_input"]["questions"][0]["question"].as_str().unwrap().len(), 5_000);
+    }
+
+    #[test]
+    fn the_last_message_keeps_up_to_its_own_larger_cap() {
+        let long = |n: usize| json!({"hook_event_name": "Stop", "last_assistant_message": "x".repeat(n)}).to_string();
+        let kept = fwd(&prepare(long(10_000).as_bytes(), "", "", "", false, no_pid).unwrap());
+        assert_eq!(kept["last_assistant_message"].as_str().unwrap().chars().count(), 10_000);
+        let capped = fwd(&prepare(long(20_000).as_bytes(), "", "", "", false, no_pid).unwrap());
+        assert_eq!(capped["last_assistant_message"].as_str().unwrap().chars().count(), MAX_MESSAGE_LEN + 1);
+        let none = fwd(&prepare(br#"{"hook_event_name":"Stop"}"#, "", "", "", false, no_pid).unwrap());
+        assert!(none.get("last_assistant_message").is_none());
     }
 
     #[test]

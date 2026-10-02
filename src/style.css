@@ -354,7 +354,7 @@ body {
   grid-template-columns: minmax(0, 1fr) calc(var(--notch-w) + 16px) minmax(0, 1fr);
   padding: 0 14px 0 38px;
 }
-.notched .strip-label { grid-column: 1; }
+.notched .strip-label { grid-column: 1; justify-self: start; max-width: 100%; }
 .notched .strip-right { grid-column: 3; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .strip-dots { display: inline-flex; gap: 4px; }
 .strip-limits { margin-left: auto; font-variant-numeric: tabular-nums; }

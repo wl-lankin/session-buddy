@@ -3,9 +3,11 @@
 // One card at a time: the card on screen stays until it resolves, then the focused
 // session's items, then the other sessions in list order. The rest are counted, never replaced.
 
-import { h } from "./dom";
+import { h, svg } from "./dom";
+import { ICONS } from "./icons";
 import { State } from "../core/state";
-import type { Interaction, Session } from "../core/types";
+import type { ActionRequest, Interaction, Session } from "../core/types";
+import { actionKey, buildAnswer, combinedQueue, folderOptions, hostChoice, hostLabel, initialDraft, visibleRows, withFolder, withHost, type ActionDraft, type QueueEntry } from "../model/actions";
 import { fmtCountdown } from "../model/format";
 import { answersFor, pendingQueue } from "../model/viewmodel";
 import { createSubmitGuard } from "../model/submitguard";
@@ -39,13 +41,16 @@ export function buildInteraction(actions: ViewActions): ViewHost {
 
   let shownId = "";
   let shownAt = 0;
-  let current: { session: Session; item: Interaction } | null = null;
+  let current: QueueEntry | null = null;
+  // What the user changed on each action card, kept while the card waits in the queue.
+  const drafts = new Map<string, ActionDraft>();
+  let choosing = false;
   let picks: Record<string, string[]> = {};
   let other: Record<string, string> = {};
   let submit: HTMLButtonElement | null = null;
   // Only the answering actions lock; "Answer in terminal" and the text fields stay usable.
   const guard = createSubmitGuard<typeof State.notice>((locked) => {
-    el.querySelectorAll<HTMLButtonElement>(".btn.primary, .btn.danger, .opt").forEach((c) => (c.disabled = locked));
+    el.querySelectorAll<HTMLButtonElement>(".btn.primary, .btn.danger, .opt, .i-fopt").forEach((c) => (c.disabled = locked));
     if (!locked) refreshSubmit();
   });
 
@@ -65,7 +70,7 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     });
 
   function refreshSubmit() {
-    if (!submit || current?.item.kind !== "question") return;
+    if (!submit || current?.kind !== "session" || current.item.kind !== "question") return;
     submit.disabled = guard.locked || answersFor(current.item.questions, picks, other) == null;
   }
 
@@ -169,12 +174,83 @@ export function buildInteraction(actions: ViewActions): ViewHost {
     foot.replaceChildren(countdown, h("span", { class: "grow" }), terminalBtn(item.requestId), btn("Send", "primary", send));
   }
 
+  function renderAction(a: ActionRequest) {
+    let draft = drafts.get(a.requestId) ?? initialDraft(a);
+    drafts.set(a.requestId, draft);
+    const edit = (next: ActionDraft) => {
+      draft = next;
+      drafts.set(a.requestId, next);
+      paint();
+      actions.relayout();
+    };
+    const folderEl = h("div", { class: "i-field" });
+    const hostEl = h("div", { class: "i-field" });
+
+    function paint() {
+      if (a.folder) {
+        const path = draft.folder ?? a.folder.path;
+        const choose = btn(choosing ? "Choosing..." : "Choose...", "secondary", () => {
+          if (!settled() || choosing) return;
+          choosing = true;
+          paint();
+          void actions.pickFolder(path).then((picked) => {
+            choosing = false;
+            edit(withFolder(draft, picked));
+          });
+        }, "Pick any folder yourself");
+        choose.disabled = choosing;
+        const options = folderOptions(a, draft);
+        folderEl.replaceChildren(
+          ...present([
+            h("span", { class: "i-fl", text: "Folder" }),
+            h("span", { class: "i-fv" }, h("span", { class: "i-path", text: path, title: path }), choose),
+            options.length
+              ? h("div", { class: "i-fopts scrollable" }, ...options.map((o) => h("button", { class: "i-fopt", title: o, onclick: (e: Event) => { e.stopPropagation(); if (!guard.locked) edit(withFolder(draft, o)); } }, o)))
+              : null,
+          ]),
+        );
+      }
+      if (a.host) {
+        const control = hostChoice(a)
+          ? h("select", { class: "i-select", title: "Where the session runs", onchange: (e: Event) => { draft = withHost(a, draft, (e.target as HTMLSelectElement).value); drafts.set(a.requestId, draft); } },
+              ...a.host.options.map((o) => h("option", { value: o.id, text: o.label, selected: o.id === draft.host })))
+          : h("span", { class: "i-fv" }, h("span", { class: "i-path plain", text: hostLabel(a, draft) }));
+        hostEl.replaceChildren(h("span", { class: "i-fl", text: "Runs in" }), control);
+      }
+    }
+    paint();
+
+    const rows = visibleRows(a);
+    body.replaceChildren(
+      ...present([
+        h("div", { class: "title", text: a.title }),
+        rows.length ? h("div", { class: "i-rows" }, ...rows.map((r) => h("div", { class: "i-row" }, h("span", { class: "i-fl", text: r.label }), h("span", { class: "i-rv", text: r.value, title: r.value })))) : null,
+        a.body ? h("div", { class: "scrollable i-prompt", text: a.body }) : null,
+        a.folder ? folderEl : null,
+        a.host ? hostEl : null,
+      ]),
+    );
+    foot.replaceChildren(
+      countdown,
+      h("span", { class: "grow" }),
+      btn("Deny", "danger", () => answer(a.requestId, buildAnswer(a, draft, false))),
+      btn("Allow", "primary", () => answer(a.requestId, buildAnswer(a, draft, true))),
+    );
+  }
+
+  // The window takes the keyboard only after the user clicks the card (Escape denies); it never steals it on its own.
+  el.addEventListener("mousedown", () => {
+    if (current?.kind === "action") actions.wantKeyboard(true);
+  });
+
   return {
     el,
     sync() {
       enlarge.refresh();
-      const queue = pendingQueue(State.sessions, State.focusId, shownId || null);
+      const shown = shownId || null;
+      const queue = combinedQueue(State.snapshot.actions, pendingQueue(State.sessions, State.focusId, shown), shown);
       current = queue[0] ?? null;
+      for (const id of [...drafts.keys()]) if (!State.snapshot.actions.some((a) => a.requestId === id)) drafts.delete(id);
       guard.observe(State.notice);
       notice.textContent = State.notice?.text ?? "";
       notice.style.display = State.notice ? "" : "none";
@@ -187,38 +263,41 @@ export function buildInteraction(actions: ViewActions): ViewHost {
         }
         return;
       }
-      const { session, item } = current;
+      const entry = current;
+      const waiting = queue.length > 1 ? h("span", { class: "i-queue", text: `+${queue.length - 1} waiting` }) : null;
       head.replaceChildren(
-        ...present([
-          statusDot(session),
-          sessionName(session, "i-who"),
-          h("span", { class: "i-kind", text: KIND_LABEL[item.kind] }),
-          queue.length > 1 ? h("span", { class: "i-queue", text: `+${queue.length - 1} waiting` }) : null,
-          enlarge.el,
-        ]),
+        ...present(
+          entry.kind === "action"
+            ? [h("span", { class: "i-buddy" }, svg(ICONS.buddy, 14)), h("span", { class: "i-who", text: "Buddy" }), h("span", { class: "i-kind", text: "Confirm" }), waiting, enlarge.el]
+            : [statusDot(entry.session), sessionName(entry.session, "i-who"), h("span", { class: "i-kind", text: KIND_LABEL[entry.item.kind] }), waiting, enlarge.el],
+        ),
       );
       const rows = State.manualH != null ? REPLY_ROWS_BIG : REPLY_ROWS;
       if (replyBox && replyBox.rows !== rows) {
         replyBox.rows = rows;
         replyBox.classList.toggle("overflowing", replyBox.scrollHeight > replyBox.clientHeight + 1);
       }
-      if (item.requestId === shownId) return;
-      shownId = item.requestId;
+      const id = entry.kind === "action" ? entry.action.requestId : entry.item.requestId;
+      if (id === shownId) return;
+      shownId = id;
       shownAt = performance.now();
       guard.reset();
       picks = {};
       other = {};
       submit = null;
       replyBox = null;
-      if (item.kind === "approval") renderApproval(session, item);
-      else if (item.kind === "question") renderQuestion(item);
-      else renderReply(item);
+      choosing = false;
+      if (entry.kind === "action") renderAction(entry.action);
+      else if (entry.item.kind === "approval") renderApproval(entry.session, entry.item);
+      else if (entry.item.kind === "question") renderQuestion(entry.item);
+      else renderReply(entry.item);
       actions.relayout();
     },
     anchorId: () => shownId || null,
     tick() {
       if (!current) return;
-      const text = `Back to the terminal in ${fmtCountdown(current.item.deadline - Date.now())}`;
+      const left = fmtCountdown((current.kind === "action" ? current.action.deadline : current.item.deadline) - Date.now());
+      const text = current.kind === "action" ? `Denied automatically in ${left}` : `Back to the terminal in ${left}`;
       if (countdown.textContent !== text) countdown.textContent = text;
     },
     measure() {
@@ -233,7 +312,13 @@ export function buildInteraction(actions: ViewActions): ViewHost {
       return rows.reduce((a, b) => a + b, 0) + Math.max(0, rows.length - 1) * 8 + pad + 22;
     },
     key(e) {
-      if (!current || current.item.kind !== "question") return false;
+      if (current?.kind === "action") {
+        if (actionKey(e.key, (e.target as Element | null)?.tagName ?? "") !== "deny") return false;
+        e.preventDefault();
+        (foot.querySelector<HTMLButtonElement>(".btn.danger"))?.click();
+        return true;
+      }
+      if (current?.kind !== "session" || current.item.kind !== "question") return false;
       if (e.key === "Enter" && !(e.target as Element | null)?.closest("textarea")) {
         e.preventDefault();
         submit?.click();

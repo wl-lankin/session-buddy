@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.5](https://img.shields.io/badge/version-1.0.5-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.6](https://img.shields.io/badge/version-1.0.6-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
@@ -21,6 +21,7 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 - **5-hour and 7-day limits** with reset times, per-model weekly limits (for example "7D Fable"), extra usage and the logged-in account.
 - **Never in the way**: Claude Code is never blocked, even when the app is closed.
 - **Chat** (off by default): ask Buddy a quick question, attach one of your sessions as context, or let it search the web. A background Claude Code (Haiku by default) runs only while you use it. Pick Sonnet, Opus or a model from your local Ollama in the chat header.
+- **Start and steer sessions from the chat** (off by default, chat mode "Control"): say "start a session in Nexa with Sonnet and have it fix the search" and Buddy asks you on a card first (project, folder you can change with a folder dialog, model, the full prompt). The session runs as a Claude Code background session and shows up in the island like any other; you can send it prompts from the island or the chat, and stop it.
 - **Pin** the expanded island to keep it open, or minimize it with one click.
 - **Buddy**, the little character that shows each session's mood, plus soft sounds (can be turned off).
 
@@ -42,8 +43,8 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/session-buddy/releases/latest)**:
 
-- **Windows**: `Session Buddy_1.0.5_x64-setup.exe`. Installs for the current user, no admin needed.
-- **macOS**: `Session Buddy_1.0.5_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
+- **Windows**: `Session Buddy_1.0.6_x64-setup.exe`. Installs for the current user, no admin needed.
+- **macOS**: `Session Buddy_1.0.6_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
 The builds are not code-signed yet, so the first start needs one extra click:
 
@@ -61,7 +62,7 @@ npm install
 npm run pack
 ```
 
-- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.5_x64-setup.exe`.
+- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.6_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
 On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
@@ -105,6 +106,7 @@ Claude Code runs a tiny relay, `sb-relay`, for every hook event and as the statu
 - That token is read fresh each time and never stored or logged.
 - Diffs and the end of command output (at most 1500 characters per stream) only go from the relay to the app and are kept in memory, never written to disk.
 - The chat is off until you turn it on. Then it starts the `claude` CLI in the background with your own Claude Code login: your messages go to Anthropic like any Claude Code use, and count against your plan. With a local Ollama model nothing leaves your machine, and there is no web search. The chat can only use web search and web fetch, no file or shell tools, and nothing it says is written to disk.
+- In Control mode the chat has no web tools. It can only list sessions and ask to start, prompt or stop background sessions in the folders you allow; every action needs your Allow on a card, it never answers a permission request or question of a session, and it never uses a bypass-permissions mode.
 - Everything else stays on your machine.
 
 ## Troubleshooting

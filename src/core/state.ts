@@ -32,6 +32,14 @@ export interface Settings {
   chatOllamaModel: string;
   chatOllamaUrl: string;
   chatClaudePath: string;
+  /** Web search, or control of Claude Code sessions (never both: a web page must not steer sessions). */
+  chatMode: "web" | "control";
+  /** Folders the chat may start sessions in. */
+  chatProjectRoots: string[];
+  /** Background sessions running at once. */
+  chatMaxWorkers: number;
+  /** Where a started session runs; "background" for now. */
+  chatSessionHost: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -54,6 +62,10 @@ export const DEFAULT_SETTINGS: Settings = {
   chatOllamaModel: "",
   chatOllamaUrl: "http://localhost:11434",
   chatClaudePath: "",
+  chatMode: "web",
+  chatProjectRoots: [],
+  chatMaxWorkers: 3,
+  chatSessionHost: "background",
 };
 
 type Listener = () => void;
@@ -126,7 +138,7 @@ class AppState {
   }
 
   get effectiveState(): BotStateName {
-    return this.stateOverride ?? botStateFor(this.mochiSession);
+    return this.stateOverride ?? (this.snapshot.actions.length ? "approval" : botStateFor(this.mochiSession));
   }
 }
 

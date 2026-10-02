@@ -46,6 +46,13 @@ async function attempt<T>(cmd: string, args?: Record<string, unknown>): Promise<
   }
 }
 
+/** The worker commands report a failure as an error string, as a rejected call or as the returned value. */
+async function workerCall(cmd: string, args: Record<string, unknown>): Promise<string | null> {
+  const r = await attempt<unknown>(cmd, args);
+  if (!r.ok) return r.error;
+  return typeof r.value === "string" && r.value ? r.value : null;
+}
+
 export interface BootInfo { settings: Settings; version: string }
 export interface InstallStatus {
   hooksInstalled: boolean;
@@ -83,6 +90,11 @@ export const Bridge = {
   /** Opens one of the settings footer links (Rust accepts only those). */
   openLink: (url: string) => call<void>("open_link", { url }),
   quit: () => call<void>("quit_app"),
+  /** The native folder dialog; null when it was cancelled. */
+  pickFolder: async (startDir?: string): Promise<string | null> => (await call<string | null>("pick_folder", startDir ? { startDir } : undefined)) ?? null,
+  /** Resolves to an error message, or null when the prompt went to the worker. */
+  workerSend: (sessionId: string, text: string) => workerCall("worker_send", { sessionId, text }),
+  workerStop: (sessionId: string) => workerCall("worker_stop", { sessionId }),
   chatSend: (text: string) => attempt<void>("chat_send", { text }),
   chatWake: () => call<void>("chat_wake"),
   chatInterrupt: () => call<void>("chat_interrupt"),

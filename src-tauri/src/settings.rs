@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::projects;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -37,6 +39,36 @@ pub struct Settings {
     pub chat_ollama_url: String,
     /// Empty = look for the `claude` CLI in the usual places.
     pub chat_claude_path: String,
+    /// "web" (web tools) or "control" (the session tools, no web).
+    pub chat_mode: String,
+    /// Folders the chat may start sessions in (existing directories, canonical, at most 20).
+    pub chat_project_roots: Vec<String>,
+    /// Background sessions running at once, 1 to 6.
+    pub chat_max_workers: u32,
+    /// Where started sessions run: "background", later "terminal", "iterm", "warp", "wt".
+    pub chat_session_host: String,
+}
+
+pub const MAX_WORKERS: u32 = 6;
+const HOSTS: [&str; 5] = ["background", "terminal", "iterm", "warp", "wt"];
+
+impl Settings {
+    /// Brings values a hand-edited file or an old front end may carry back into range. No file access.
+    pub fn clamp(&mut self) {
+        self.chat_max_workers = self.chat_max_workers.clamp(1, MAX_WORKERS);
+        if !matches!(self.chat_mode.as_str(), "web" | "control") {
+            self.chat_mode = "web".into();
+        }
+        if !HOSTS.contains(&self.chat_session_host.as_str()) {
+            self.chat_session_host = "background".into();
+        }
+    }
+
+    /// `clamp`, and the project roots reduced to existing directories (canonical, at most 20).
+    pub fn normalize(&mut self) {
+        self.clamp();
+        self.chat_project_roots = projects::normalize_roots(&self.chat_project_roots);
+    }
 }
 
 impl Default for Settings {
@@ -61,6 +93,10 @@ impl Default for Settings {
             chat_ollama_model: String::new(),
             chat_ollama_url: "http://localhost:11434".into(),
             chat_claude_path: String::new(),
+            chat_mode: "web".into(),
+            chat_project_roots: Vec::new(),
+            chat_max_workers: 3,
+            chat_session_host: "background".into(),
         }
     }
 }
@@ -70,7 +106,9 @@ fn path() -> PathBuf {
 }
 
 pub fn load() -> Settings {
-    std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    let mut settings: Settings = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    settings.clamp();
+    settings
 }
 
 pub fn save(settings: &Settings) -> std::io::Result<()> {
@@ -111,5 +149,43 @@ mod tests {
         assert_eq!(v["chatProvider"], "claude");
         assert_eq!(v["chatOllamaModel"], "");
         assert_eq!(v["chatOllamaUrl"], "http://localhost:11434");
+    }
+
+    #[test]
+    fn older_files_get_the_control_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"chatEnabled": true}"#).unwrap();
+        assert_eq!(s.chat_mode, "web");
+        assert!(s.chat_project_roots.is_empty());
+        assert_eq!(s.chat_max_workers, 3);
+        assert_eq!(s.chat_session_host, "background");
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["chatMode"], "web");
+        assert_eq!(v["chatProjectRoots"], serde_json::json!([]));
+        assert_eq!(v["chatMaxWorkers"], 3);
+        assert_eq!(v["chatSessionHost"], "background");
+    }
+
+    #[test]
+    fn clamp_fixes_out_of_range_values() {
+        let mut s = Settings { chat_max_workers: 0, chat_mode: "both".into(), chat_session_host: "rm -rf".into(), ..Settings::default() };
+        s.clamp();
+        assert_eq!((s.chat_max_workers, s.chat_mode.as_str(), s.chat_session_host.as_str()), (1, "web", "background"));
+        s.chat_max_workers = 99;
+        s.chat_mode = "control".into();
+        s.chat_session_host = "iterm".into();
+        s.clamp();
+        assert_eq!((s.chat_max_workers, s.chat_mode.as_str(), s.chat_session_host.as_str()), (6, "control", "iterm"));
+    }
+
+    #[test]
+    fn normalize_keeps_existing_folders_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Settings {
+            chat_project_roots: vec![dir.path().to_string_lossy().into_owned(), dir.path().join("missing").to_string_lossy().into_owned(), dir.path().to_string_lossy().into_owned()],
+            ..Settings::default()
+        };
+        s.normalize();
+        assert_eq!(s.chat_project_roots.len(), 1);
+        assert!(std::path::Path::new(&s.chat_project_roots[0]).is_dir());
     }
 }

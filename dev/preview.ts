@@ -7,7 +7,7 @@
 
 import type { Snapshot } from "../src/core/types";
 import { State } from "../src/core/state";
-import { demoChat, demoSnapshot, demoUsage } from "./fixtures";
+import { demoAction, demoChat, demoControlChat, demoManaged, demoSnapshot, demoUsage } from "./fixtures";
 
 async function island(): Promise<NonNullable<Window["__sb"]>> {
   for (;;) {
@@ -26,10 +26,42 @@ push();
 
 // ?chat=demo starts with a finished conversation; without it the chat is off until the switch is used
 // (the bubble button or "/" opens it, the answers come from the scripted fake in src/core/chatfake.ts).
-if (new URLSearchParams(location.search).get("chat") === "demo") {
+// Session control: ?chat=control (a control conversation), ?chat=empty (a fresh chat), &mode=control, &roots=0|1
+// (project folders set up or not), ?action=1|2|single (confirmation cards), ?managed=idle|working (a session Buddy started).
+const params = new URLSearchParams(location.search);
+const chatParam = params.get("chat");
+const control = params.get("mode") === "control" || chatParam === "control";
+const roots = chatParam === "control" ? params.get("roots") !== "0" : params.get("roots") === "1";
+if (control) State.settings = { ...State.settings, chatMode: "control" };
+State.settings = { ...State.settings, chatProjectRoots: roots ? ["/Users/alex/Projects"] : [] };
+if (chatParam === "demo") {
   State.settings = { ...State.settings, chatEnabled: true };
   for (const a of demoChat(Date.now())) sb.chat(a);
+} else if (chatParam === "control") {
+  State.settings = { ...State.settings, chatEnabled: true, chatModel: "sonnet" };
+  for (const a of demoControlChat(Date.now(), roots)) sb.chat(a);
+} else if (chatParam === "empty") {
+  State.settings = { ...State.settings, chatEnabled: true };
+  sb.chat({
+    type: "status", at: Date.now(),
+    status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: !control, mode: control ? "control" : "web", controlReady: roots },
+  });
 }
+
+const showAction = (project = "nexa-web") => {
+  snap = { ...snap, actions: [...snap.actions, demoAction(Date.now() + snap.actions.length, project, params.get("action") !== "single")] };
+  push();
+};
+const actionParam = params.get("action");
+if (actionParam) {
+  setTimeout(showAction, 800);
+  if (actionParam === "2") setTimeout(() => showAction("fetchdocs"), 900);
+}
+window.addEventListener("sb-fake-start", (e) => showAction((e as CustomEvent<{ project: string }>).detail.project));
+
+const managedParam = params.get("managed");
+if (managedParam) snap = { ...snap, sessions: [...snap.sessions, demoManaged(Date.now(), managedParam === "working" ? "working" : "idle")] };
+push();
 
 const PLAN = [
   "## Plan: fix the DATEV 409 handling",
@@ -58,9 +90,28 @@ if (!QUIET) setTimeout(() => {
   push();
 }, 30_000);
 
+const setManaged = (patch: Partial<Snapshot["sessions"][number]>) => {
+  snap = { ...snap, sessions: snap.sessions.map((s) => (s.id === "w1" ? { ...s, ...patch } : s)) };
+  push();
+};
+
 window.addEventListener("sb-invoke", (e) => {
-  const { cmd, args } = (e as CustomEvent<{ cmd: string; args?: { requestId?: string } }>).detail;
-  console.log("[preview]", cmd, args);
+  const { cmd, args } = (e as CustomEvent<{ cmd: string; args?: { requestId?: string; answer?: { allow?: boolean }; sessionId?: string } }>).detail;
+  console.log("[preview]", cmd, JSON.stringify(args));
+  if (cmd === "answer" && args?.requestId && snap.actions.some((a) => a.requestId === args.requestId)) {
+    const allowed = args.answer?.allow === true;
+    snap = { ...snap, actions: snap.actions.filter((a) => a.requestId !== args.requestId) };
+    if (allowed && !snap.sessions.some((s) => s.id === "w1")) snap = { ...snap, sessions: [...snap.sessions, demoManaged(Date.now(), "working")] };
+    push();
+  }
+  if (cmd === "worker_send") {
+    setManaged({ status: "working", statusSince: Date.now() });
+    setTimeout(() => setManaged({ status: "idle", statusSince: Date.now(), lastMessage: "Done. I changed the sort order and added a test." }), 4000);
+  }
+  if (cmd === "worker_stop") {
+    snap = { ...snap, sessions: snap.sessions.filter((s) => s.id !== "w1") };
+    push();
+  }
   if ((cmd === "answer" || cmd === "release") && args?.requestId) {
     snap = {
       ...snap,

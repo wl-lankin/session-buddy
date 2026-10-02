@@ -62,6 +62,20 @@ export interface Session {
   live: boolean;
   /** The plan waiting in Claude Code's own terminal dialog (ExitPlanMode); "" when its text is unknown. */
   plan: string | null;
+  /** Started by Buddy from the chat: a background session that accepts prompts from the island. */
+  managed: boolean;
+}
+
+/** A confirmation without a session: the chat wants to act (start a session). Answered with `{ allow, folder?, host? }`. */
+export interface ActionRequest {
+  requestId: string;
+  title: string;
+  rows: { label: string; value: string }[];
+  /** The full prompt, scrollable. */
+  body: string | null;
+  folder: { path: string; options: string[] } | null;
+  host: { value: string; options: { id: string; label: string }[] } | null;
+  deadline: number;
 }
 
 export interface Limit { usedPct: number; resetsAt: string | number | null; severity: string }
@@ -91,7 +105,7 @@ export interface Usage {
   account: Account | null;
 }
 
-export interface Snapshot { sessions: Session[]; usage: Usage; now: number }
+export interface Snapshot { sessions: Session[]; usage: Usage; now: number; actions: ActionRequest[] }
 
 export type CueKind = "work" | "finish" | "error" | "approval" | "rate" | "context";
 export interface Cue {
@@ -107,4 +121,5 @@ export const EMPTY_SNAPSHOT: Snapshot = {
   sessions: [],
   usage: { fiveHour: null, sevenDay: null, limits: [], extra: null, source: "none", updatedAt: null, error: null, oauthUpdatedAt: null, oauthError: null, account: null },
   now: 0,
+  actions: [],
 };

@@ -7,6 +7,7 @@ import type { Session } from "../core/types";
 import { fmtAdded, fmtRemoved, level, type Level } from "../model/format";
 import { sessionTitle, statusGlyph } from "../model/viewmodel";
 import { State } from "../core/state";
+import { MANAGED_TITLE } from "../model/managed";
 
 /** A width of 0 leaves the width to CSS. */
 export function bar(pct: number | null, width = 64, lvl: Level = level(pct)): HTMLElement {
@@ -38,6 +39,11 @@ export function linesChanged(added: number, removed: number): Node[] {
 /** The branch chip: a git-branch glyph and the branch name. */
 export function branchChip(branch: string): HTMLElement {
   return h("span", { class: "branch" }, svg(ICONS.branch, 10, { stroke: 2.4 }), h("span", { class: "branch-name", text: branch }));
+}
+
+/** The small Buddy glyph on sessions Buddy started. */
+export function managedMark(size = 12): HTMLElement {
+  return h("span", { class: "managed-mark", title: MANAGED_TITLE }, svg(ICONS.buddy, size));
 }
 
 /** Project name (shrinks with an ellipsis) and the branch as its own chip that stays visible. */

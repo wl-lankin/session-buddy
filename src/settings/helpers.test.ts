@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, secondsLabel } from "./helpers";
+import { addRoot, DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, removeRoot, rootParts, secondsLabel } from "./helpers";
 
 describe("normalizeNumber", () => {
   it("rounds fractional input when integer", () => {
@@ -54,5 +54,30 @@ describe("ollamaTestText", () => {
   });
   it("names the address of an unreachable one", () => {
     expect(ollamaTestText(false, 0, "http://localhost:11434")).toBe("Ollama is not reachable at http://localhost:11434 - start it with `ollama serve`");
+  });
+});
+
+describe("project roots", () => {
+  it("adds a folder once, trimmed and without a trailing separator", () => {
+    expect(addRoot([], " /Users/a/Projects/ ")).toEqual(["/Users/a/Projects"]);
+    expect(addRoot(["C:\\Code"], "C:\\Code\\")).toEqual(["C:\\Code"]);
+  });
+  it("returns the same list for a cancelled dialog or a duplicate", () => {
+    const roots = ["/a"];
+    expect(addRoot(roots, null)).toBe(roots);
+    expect(addRoot(roots, "  ")).toBe(roots);
+    expect(addRoot(roots, "/a/")).toBe(roots);
+  });
+  it("keeps the root folder itself", () => {
+    expect(addRoot([], "/")).toEqual(["/"]);
+  });
+  it("removes one folder", () => {
+    expect(removeRoot(["/a", "/b"], "/a")).toEqual(["/b"]);
+  });
+  it("splits a path into name and place", () => {
+    expect(rootParts("/Users/a/Projects/nexa")).toEqual({ name: "nexa", dir: "/Users/a/Projects" });
+    expect(rootParts("C:\\Code\\nexa\\")).toEqual({ name: "nexa", dir: "C:\\Code" });
+    expect(rootParts("/nexa")).toEqual({ name: "nexa", dir: "/" });
+    expect(rootParts("nexa")).toEqual({ name: "nexa", dir: "" });
   });
 });

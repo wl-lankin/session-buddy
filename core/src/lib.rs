@@ -1,5 +1,6 @@
 //! session-buddy's core: everything that can be tested without a window.
 
+pub mod actions;
 pub mod adopt;
 pub mod bootstrap;
 pub mod branch;

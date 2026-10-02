@@ -2,20 +2,25 @@
 
 mod autostart;
 mod chat;
+mod cli;
+mod control;
 mod install;
 mod ipc;
 mod island;
 mod links;
 mod log;
 mod process;
+mod projects;
 mod settings;
 mod tray;
 mod usage_poll;
+mod workers;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use sb_core::actions::ActionRequest;
 use sb_core::hub::Hub;
 use sb_core::store::{Cue, Session};
 use sb_core::usage::Usage;
@@ -25,6 +30,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+use control::Control;
 use install::{InstallPreview, InstallStatus};
 use island::{Gate, WINDOW_LABEL};
 use settings::Settings;
@@ -49,6 +55,8 @@ pub struct Snapshot {
     sessions: Vec<Session>,
     usage: Usage,
     now: i64,
+    /// Confirmations without a session (e.g. "Start a session"), empty normally.
+    actions: Vec<ActionRequest>,
 }
 
 #[derive(Serialize)]
@@ -61,7 +69,7 @@ pub struct BootInfo {
 fn build_snapshot(shared: &Shared) -> Snapshot {
     let sessions = shared.hub.store.lock().unwrap().snapshot();
     let usage = shared.usage.lock().unwrap().clone();
-    Snapshot { sessions, usage, now: now_ms() }
+    Snapshot { sessions, usage, now: now_ms(), actions: shared.hub.actions() }
 }
 
 fn apply_store_limits(shared: &Shared) {
@@ -82,7 +90,8 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
+fn save_settings(app: AppHandle, shared: State<Shared>, mut settings: Settings) {
+    settings.normalize();
     let (screen_changed, autostart_changed, hotkey_changed, chat_turned_off, chat_config_changed) = {
         let mut current = shared.settings.lock().unwrap();
         let changed = (current.screen != settings.screen, current.autostart != settings.autostart, current.hotkey != settings.hotkey, current.chat_enabled && !settings.chat_enabled, chat::restart_needed(&current, &settings));
@@ -161,6 +170,45 @@ fn answer(shared: State<Shared>, request_id: String, answer: Value) -> Result<()
 fn release(shared: State<Shared>, request_id: String) {
     log::line(format!("release id={request_id}"));
     shared.hub.release(&request_id);
+}
+
+/// The user's own "send a prompt to this session" from the island: no confirmation card.
+#[tauri::command]
+async fn worker_send(control: State<'_, Arc<Control>>, session_id: String, text: String) -> Result<(), String> {
+    let control = control.inner().clone();
+    control.user_send(session_id, text).await
+}
+
+#[tauri::command]
+async fn worker_stop(control: State<'_, Arc<Control>>, session_id: String) -> Result<(), String> {
+    let control = control.inner().clone();
+    control.user_stop(session_id).await
+}
+
+/// Opens the user's terminal on the background session (`claude attach`).
+#[tauri::command]
+async fn worker_attach(app: AppHandle, control: State<'_, Arc<Control>>, session_id: String) -> Result<(), String> {
+    let control = control.inner().clone();
+    let setting = app.state::<Shared>().settings.lock().unwrap().chat_claude_path.clone();
+    let bin = tauri::async_runtime::spawn_blocking(move || cli::resolve(&setting)).await.map_err(|e| e.to_string())?;
+    control.user_attach(session_id, bin).await
+}
+
+/// The native folder dialog. Opened by the island, never by the model. None when cancelled.
+#[tauri::command]
+async fn pick_folder(app: AppHandle, start_dir: Option<String>) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let _ = app.run_on_main_thread(island::activate_app);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    if let Some(dir) = start_dir.as_deref().and_then(|d| projects::canonical_dir(std::path::Path::new(d))) {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_folder(move |picked| {
+        let _ = tx.send(picked);
+    });
+    let path = rx.await.ok().flatten()?.into_path().ok()?;
+    projects::canonical_dir(&path).map(|p| p.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -274,6 +322,8 @@ fn spawn_bootstrap(app: AppHandle) {
         log::line(format!("bootstrap: {count} recent session(s)"));
         mark_dirty();
         adopt_running(&app);
+        // Background sessions an earlier run started carry our name marker: flag them again.
+        let _ = app.state::<Arc<Control>>().workers().refresh();
     });
 }
 
@@ -362,6 +412,27 @@ fn spawn_loops(app: AppHandle) {
     });
 }
 
+/// The chat's session tools: background sessions through the CLI, served to the relay by the hub.
+fn build_control(hub: &Arc<Hub>) -> Arc<Control> {
+    let flagger = hub.clone();
+    let runner = workers::Claude { path_setting: Box::new(|| current_settings().chat_claude_path) };
+    let workers = Arc::new(workers::Workers::new(Arc::new(runner), move |session_id| {
+        flagger.store.lock().unwrap().mark_managed(session_id);
+        mark_dirty();
+    }));
+    let control = Arc::new(Control::new(hub.clone(), workers, current_settings));
+    let handler = control.clone();
+    hub.set_tool_handler(Box::new(move |_hub, request| {
+        let control = handler.clone();
+        Box::pin(async move { control.handle(request).await })
+    }));
+    control
+}
+
+fn current_settings() -> Settings {
+    APP.get().map(|app| app.state::<Shared>().settings.lock().unwrap().clone()).unwrap_or_default()
+}
+
 pub fn run() {
     let settings = settings::load();
     let hub = Hub::new(|cues: Vec<Cue>| {
@@ -380,6 +451,7 @@ pub fn run() {
         usage: Mutex::new(Usage::default()),
     };
     apply_store_limits(&shared);
+    let control = build_control(&shared.hub);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -387,12 +459,14 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(shared)
         .manage(chat::Chat::default())
+        .manage(control)
         .invoke_handler(tauri::generate_handler![
             boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release,
             install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app, chat::chat_send, chat::chat_wake, chat::chat_interrupt,
-            chat::chat_reset, chat::chat_status, chat::chat_models
+            chat::chat_reset, chat::chat_status, chat::chat_models, worker_send, worker_stop, worker_attach, pick_folder
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

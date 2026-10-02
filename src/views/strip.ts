@@ -3,7 +3,7 @@
 import { h, clear } from "./dom";
 import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
-import { limitsShort, recentClass, stripLabel, summarize } from "../model/viewmodel";
+import { limitParts, recentClass, stripLabel, summarize } from "../model/viewmodel";
 import type { ViewHost } from "./views";
 
 export function buildStrip(): ViewHost {
@@ -41,9 +41,16 @@ export function buildStrip(): ViewHost {
           dots.append(h("i", { class: `sdot ${s.status}${recentClass(s)}`, style: `--c:${colorForProject(s.project)}`, title: s.project }));
         }
       }
-      const l = limitsShort(State.snapshot.usage);
-      limits.textContent = l.text;
-      limits.className = `strip-limits ${l.level}`;
+      const parts = limitParts(State.snapshot.usage);
+      const limitsKey = parts.map((p) => `${p.text}:${p.level}`).join("|");
+      if (limits.dataset.key !== limitsKey) {
+        limits.dataset.key = limitsKey;
+        clear(limits);
+        parts.forEach((p, i) => {
+          if (i) limits.append(" \u00B7 ");
+          limits.append(h("span", { class: `lim ${p.level}`, text: p.text }));
+        });
+      }
     },
   };
 }

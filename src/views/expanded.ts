@@ -13,7 +13,7 @@ import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format"
 import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, oauthNote, recentClass, recentCount, rowLevel, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { accountWidth } from "../model/size";
 import { diffLines, stepKey } from "../model/stepdetail";
-import { bar, enlargeButton, keyed, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
+import { bar, enlargeButton, keyed, pinButton, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 const STEP_ROWS = 7;
@@ -38,9 +38,27 @@ function recentPill(actions: ViewActions, count: number, on: boolean): Node {
   });
 }
 
+/** The bubble before the "Recent" pill: opens Buddy Chat; a dot says an answer arrived while it was closed. */
+function chatButton(actions: ViewActions): Node {
+  const unread = State.chat.unread;
+  return h(
+    "button",
+    {
+      class: `tab chat-tab${unread ? " unread" : ""}`,
+      title: unread ? "Chat with Buddy: a new answer (/)" : "Chat with Buddy (/)",
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        actions.openChat();
+      },
+    },
+    svg(ICONS.bubble, 13),
+    unread ? h("i", { class: "chat-dot" }) : null,
+  );
+}
+
 function tabs(actions: ViewActions, sessions: Session[], focusId: string | null, recent: number): Node[] {
   const pill = recent ? [recentPill(actions, recent, State.showRecent)] : [];
-  return [...tabButtons(actions, sessions, focusId), ...pill];
+  return [...tabButtons(actions, sessions, focusId), chatButton(actions), ...pill];
 }
 
 function tabButtons(actions: ViewActions, sessions: Session[], focusId: string | null): Node[] {
@@ -332,6 +350,7 @@ const ACCOUNT_CHROME = 23;
 export function buildSessionView(actions: ViewActions): ViewHost {
   const tabsEl = h("div", { class: "x-tabs" });
   const enlarge = enlargeButton(() => actions.toggleEnlarge());
+  const pin = pinButton(() => actions.togglePin());
   const fold = h("button", {
     class: "enlarge",
     title: "Minimize to the strip",
@@ -380,7 +399,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { class: "view session-view" },
-    h("div", { class: "blk x-tabs-blk" }, tabsEl, enlarge.el, fold),
+    h("div", { class: "blk x-tabs-blk" }, tabsEl, pin.el, enlarge.el, fold),
     h("div", { class: "x-main" }, sessionEl, accountEl),
   );
   let acctW = accountWidth(0);
@@ -434,12 +453,13 @@ export function buildSessionView(actions: ViewActions): ViewHost {
     },
     sync() {
       enlarge.refresh();
+      pin.refresh();
       const all = State.sessions;
       const s = State.focus;
       const now = Date.now();
       const minute = Math.floor(now / 60_000);
       const recent = recentCount(State.allSessions);
-      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}`, () =>
+      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}#${State.chat.unread}`, () =>
         tabs(actions, all, s?.id ?? null, recent),
       );
       keyed(accountEl, JSON.stringify([State.snapshot.usage, minute]), () => accountBlock(State.snapshot.usage, now));

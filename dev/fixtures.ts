@@ -2,6 +2,7 @@
 // the limits block can be in.
 
 import type { Session, Snapshot, Usage } from "../src/core/types";
+import type { ChatAction, ChatEvent } from "../src/model/chat";
 
 const base = (id: string, project: string, now: number, p: Partial<Session>): Session => ({
   id, project, cwd: `C:\\Projects\\${project}`, branch: null, termProgram: "WarpTerminal", model: "Opus 5.5",
@@ -94,4 +95,31 @@ export function demoSnapshot(now: number): Snapshot {
       }),
     ],
   };
+}
+
+/**
+ * A chat that went through a sleep: one answer with a context chip and Markdown, one with a web search.
+ * Replay it with island.chatDispatch / window.__sb.chat. "empty" is a fresh chat, "off" the Off card.
+ */
+export function demoChat(now: number, kind: "full" | "empty" | "off" = "full"): ChatAction[] {
+  const at = (s: number) => now - (600 - s) * 1000;
+  const ev = (s: number, event: ChatEvent): ChatAction => ({ type: "event", event, at: at(s), viewing: true });
+  if (kind !== "full") return [{ type: "status", status: { enabled: kind === "empty", state: kind === "empty" ? "ready" : "off", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: at(0) }];
+  const first = "**pushdocs** is fixing the DATEV 409 handling.\n\n1. It read `DatevClient.php` and searched for the fault\n2. The last test run failed, so it is editing the client again\n\nNothing needs you right now. To rerun the failing test yourself:\n\n```bash\nphp artisan test --filter Datev\n```";
+  const second = "Claude Code 2.1 starts about twice as fast and has a tidier `/permissions` screen.\n\nSee the [release notes](https://docs.claude.com/en/release-notes/claude-code) for the full list.";
+  return [
+    { type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: at(0) },
+    { type: "send", text: "What is pushdocs doing right now?", context: { kind: "session", label: "pushdocs \u00B7 PDD-1981" }, at: at(10) },
+    ev(11, { type: "turn", id: "t1" }),
+    ev(12, { type: "delta", id: "t1", text: first }),
+    ev(13, { type: "done", id: "t1", text: first, durationMs: 2300 }),
+    ev(300, { type: "status", state: "off" }),
+    { type: "send", text: "What is new in Claude Code?", context: null, at: at(500) },
+    ev(501, { type: "status", state: "starting" }),
+    ev(502, { type: "status", state: "ready" }),
+    ev(503, { type: "turn", id: "t2" }),
+    ev(504, { type: "tool", id: "t2", callId: "c1", tool: "WebSearch", label: "claude code release notes", state: "done" }),
+    ev(505, { type: "delta", id: "t2", text: second }),
+    ev(506, { type: "done", id: "t2", text: second, durationMs: 9800 }),
+  ];
 }

@@ -3,7 +3,7 @@
 // island is drawn inside it, glued to the top edge and horizontally centred.
 
 export type IslandMode = "strip" | "compact" | "expanded";
-export type IslandViewName = "session" | "interaction" | "plan" | "finished" | "empty" | "confused" | "greeting";
+export type IslandViewName = "session" | "interaction" | "plan" | "finished" | "empty" | "confused" | "greeting" | "chat";
 
 export type BotStateName =
   | "idle" | "working" | "thinking" | "searching" | "approval" | "question"
@@ -42,6 +42,7 @@ const VIEW_HEIGHTS: Record<IslandViewName, number> = {
   empty: 140,
   confused: 160,
   greeting: 150,
+  chat: 440,
 };
 
 /** The session view without its unfolded last answer. */

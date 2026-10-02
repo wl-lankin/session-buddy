@@ -14,7 +14,8 @@ import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, F
 import { accountWidth } from "../model/size";
 import { diffLines, stepKey } from "../model/stepdetail";
 import { bar, enlargeButton, keyed, managedMark, pinButton, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
-import { cleanPrompt, isManaged, newDrafts, pruneDrafts, workerLine } from "../model/managed";
+import { isManaged, newDrafts, pruneDrafts } from "../model/managed";
+import { checkMessage, COMPOSER_MAX_LINES, composer, messageRows, queuedCount } from "../model/messages";
 import type { ViewActions, ViewHost } from "./views";
 
 const STEP_ROWS = 7;
@@ -23,6 +24,9 @@ const STEP_ROW_H = 20;
 const STEP_HEAD_H = 18;
 const AGENT_ROWS = 4;
 const BG_ROWS = 2;
+/** The composer's text line and its vertical padding and border (see .x-w-input). */
+const COMPOSER_LINE_H = 16;
+const COMPOSER_PAD = 12;
 
 const present = (xs: (Node | null | undefined | false)[]): Node[] => xs.filter(Boolean) as Node[];
 
@@ -77,6 +81,7 @@ function tabButtons(actions: ViewActions, sessions: Session[], focusId: string |
       h("span", { class: `sglyph ${s.status}`, style: `--c:${colorForProject(s.project)}`, text: statusGlyph(s.status) }),
       h("span", { class: "tab-name", text: s.project }),
       s.managed ? managedMark(11) : null,
+      queuedCount(s) ? h("i", { class: "msg-badge", title: "A message waits for this session" }) : null,
     ),
   );
 }
@@ -389,48 +394,105 @@ export function buildSessionView(actions: ViewActions): ViewHost {
   };
   const accountEl = h("div", { class: "blk x-account" });
 
-  // Prompt line and Stop for a session Buddy started: the user's own actions, no confirmation card.
+  // One composer for every live session; the backend picks the path (queue, or direct for a managed one).
+  // These are the user's own actions: no confirmation card.
   const drafts = newDrafts();
   let workerFor = "";
   let sending = false;
   let stopping = false;
-  const wInput = h("input", { class: "x-w-input", type: "text", spellcheck: "false", placeholder: "Send a prompt to this session" });
+  let inputH = COMPOSER_LINE_H + COMPOSER_PAD;
+  const wInput = h("textarea", { class: "x-w-input", rows: "1", spellcheck: "false", placeholder: "Message this session" });
   const wSend = h("button", { class: "x-w-send", title: "Send (Enter)" }, svg(ICONS.arrowUp, 13, { stroke: 2.2 }));
   const wStop = h("button", { class: "x-w-stop", title: "Stop this session" }, svg(ICONS.stop, 11), h("span", { text: "Stop" }));
+  const wHelp = h("div", { class: "x-w-help" });
   const wErr = h("div", { class: "x-w-err" });
-  const workerEl = h("div", { class: "x-worker" }, h("div", { class: "x-w-line" }, wInput, wSend, wStop), wErr);
+  const wRows = h("div", { class: "x-w-rows" });
+  const workerEl = h("div", { class: "x-worker" }, h("div", { class: "x-w-line" }, wInput, wSend, wStop), wHelp, wErr, wRows);
   workerEl.style.display = "none";
+  /** Grows with the text up to COMPOSER_MAX_LINES; true when the height changed. */
+  const growInput = (): boolean => {
+    wInput.style.height = "auto";
+    const max = COMPOSER_LINE_H * COMPOSER_MAX_LINES + COMPOSER_PAD;
+    const next = Math.max(COMPOSER_LINE_H + COMPOSER_PAD, Math.min(wInput.scrollHeight + 2, max));
+    wInput.style.height = `${next}px`;
+    wInput.style.overflowY = wInput.scrollHeight + 2 > max ? "auto" : "hidden";
+    const changed = next !== inputH;
+    inputH = next;
+    return changed;
+  };
   const paintWorker = (s: Session) => {
-    const line = workerLine(s);
-    workerEl.style.display = line.visible ? "" : "none";
-    wInput.disabled = line.disabled || sending;
-    if (wInput.placeholder !== line.placeholder) wInput.placeholder = line.placeholder;
-    wSend.disabled = line.disabled || sending || cleanPrompt(wInput.value) === null;
-    wStop.disabled = !line.canStop || stopping;
+    const c = composer(s);
+    workerEl.style.display = "";
+    wInput.disabled = c.disabled || sending;
+    wSend.disabled = c.disabled || sending || !wInput.value.trim();
+    wStop.style.display = c.canStop ? "" : "none";
+    wStop.disabled = stopping;
+    if (wHelp.textContent !== c.helper) wHelp.textContent = c.helper;
+    wHelp.classList.toggle("hint", c.disabled);
     const err = drafts.error.get(s.id) ?? "";
     if (wErr.textContent !== err) wErr.textContent = err;
     wErr.style.display = err ? "" : "none";
   };
-  const sendPrompt = () => {
+  const paintRows = (s: Session, now: number) => {
+    const rows = messageRows(s.messages, now);
+    keyed(wRows, `${s.id}#${JSON.stringify(rows)}`, () =>
+      rows.map((r) => {
+        if (r.kind === "queued") {
+          return h(
+            "div",
+            { class: "x-m-row queued", title: r.text },
+            h("span", { class: "x-m-text", text: r.text }),
+            h("span", { class: "x-m-state", text: "queued" }),
+            h("button", {
+              class: "x-m-cancel",
+              text: "Cancel",
+              onclick: (e: Event) => {
+                e.stopPropagation();
+                drafts.error.delete(s.id);
+                void actions.message.cancel(s.id, r.id).then((error) => {
+                  if (error) drafts.error.set(s.id, error);
+                  actions.redraw();
+                });
+              },
+            }),
+          );
+        }
+        if (r.kind === "delivered") return h("div", { class: "x-m-row done", title: r.text }, h("span", { class: "x-m-state", text: r.label }));
+        return h("div", { class: "x-m-row expired", title: r.text }, h("span", { class: "x-m-state", text: r.label }), h("span", { class: "x-m-text copyable", text: r.text }));
+      }),
+    );
+  };
+  const sendMessage = () => {
     const s = State.focus;
-    const text = cleanPrompt(wInput.value);
-    if (!s || !text || sending || workerLine(s).disabled) return;
+    if (!s || sending || composer(s).disabled) return;
+    const check = checkMessage(wInput.value);
+    if (!check.ok) {
+      if (wInput.value.trim()) {
+        drafts.error.set(s.id, check.error);
+        paintWorker(s);
+      }
+      return;
+    }
     sending = true;
     drafts.error.delete(s.id);
     paintWorker(s);
-    void actions.worker.send(s.id, text).then((error) => {
+    void actions.message.send(s.id, check.text).then((error) => {
       sending = false;
       if (error) drafts.error.set(s.id, error);
       else {
         drafts.text.delete(s.id);
-        if (workerFor === s.id) wInput.value = "";
+        if (workerFor === s.id) {
+          wInput.value = "";
+          growInput();
+        }
       }
       actions.redraw();
+      actions.relayout();
     });
   };
   wSend.addEventListener("click", (e) => {
     e.stopPropagation();
-    sendPrompt();
+    sendMessage();
   });
   wStop.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -454,12 +516,13 @@ export function buildSessionView(actions: ViewActions): ViewHost {
     if (workerFor && drafts.error.delete(workerFor)) actions.redraw();
     const s = State.focus;
     if (s) paintWorker(s);
+    if (growInput()) actions.relayout();
   });
   wInput.addEventListener("blur", () => actions.wantKeyboard(false));
   wInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      sendPrompt();
+      sendMessage();
     }
   });
   const sessionEl = h(
@@ -538,7 +601,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       const now = Date.now();
       const minute = Math.floor(now / 60_000);
       const recent = recentCount(State.allSessions);
-      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}:${x.managed}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}#${State.chat.unread}`, () =>
+      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}:${x.managed}:${queuedCount(x)}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}#${State.chat.unread}`, () =>
         tabs(actions, all, s?.id ?? null, recent),
       );
       keyed(accountEl, JSON.stringify([State.snapshot.usage, minute]), () => accountBlock(State.snapshot.usage, now));
@@ -561,8 +624,10 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       if (workerFor !== s.id) {
         workerFor = s.id;
         wInput.value = drafts.text.get(s.id) ?? "";
+        if (growInput()) actions.relayout();
       }
       paintWorker(s);
+      paintRows(s, now);
       keyed(headEl, JSON.stringify([s.id, s.status, s.project, s.branch, s.cwd, s.stats, s.model, s.managed]), () => header(s));
       const prompt = s.lastPrompt ? firstLine(s.lastPrompt, 160) : "";
       keyed(promptEl, prompt, () => (prompt ? [h("span", { class: "lbl", text: "Prompt " }), document.createTextNode(prompt)] : []));

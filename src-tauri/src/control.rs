@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use sb_core::actions::{ActionRequest, FolderChoice, HostChoice, HostOption};
 use sb_core::hub::Hub;
+use sb_core::messages::MAX_QUEUED;
 use sb_core::steps::clip;
 use sb_core::store::{Interaction, Session};
 use serde_json::{json, Value};
@@ -205,7 +206,11 @@ impl Control {
             "send_prompt" => {
                 let id = str_arg(input, "session_id")?.to_string();
                 let text = check_text(str_arg(input, "text")?, "text")?;
-                let info = self.steerable(&id).await?;
+                let this = self.clone();
+                let worker = id.clone();
+                let Some(info) = blocking(move || this.workers.info(&worker)).await? else {
+                    return self.prepare_message(&id, text);
+                };
                 if info.agent.running() && !info.agent.idle() {
                     return Err(workers::BUSY.into());
                 }
@@ -226,6 +231,18 @@ impl Control {
                 Ok(Prepared { request, tool, args: json!({"session_id": id}) })
             }
         }
+    }
+
+    /// The card for a message to a session Session Buddy did not start: it is queued, not typed.
+    fn prepare_message(&self, id: &str, text: String) -> Result<Prepared, String> {
+        let store = self.hub.store.lock().unwrap();
+        let session = store.get(id).filter(|s| s.live).ok_or("That session is not running or not known. Use list_sessions for the ids.")?;
+        if session.messages.queued() >= MAX_QUEUED {
+            return Err(format!("{MAX_QUEUED} messages are already waiting for that session."));
+        }
+        let mut request = ActionRequest::new("Send a message").row("Session", &session.project);
+        request.body = Some(text.clone());
+        Ok(Prepared { request, tool: "send_prompt", args: json!({"session_id": id, "text": text}) })
     }
 
     async fn steerable(self: &Arc<Self>, session_id: &str) -> Result<workers::Info, String> {
@@ -274,8 +291,13 @@ impl Control {
                 })
             }
             "send_prompt" => {
-                let project = self.workers.send(str_arg(args, "session_id")?, &check_text(str_arg(args, "text")?, "text")?)?;
-                Ok(format!("Sent the prompt to {project}."))
+                let id = str_arg(args, "session_id")?;
+                let text = check_text(str_arg(args, "text")?, "text")?;
+                if self.workers.info(id).is_none() {
+                    self.hub.queue_message(id, &text)?;
+                    return Ok("Queued the message. The session receives it at its next step, or when it starts working again.".into());
+                }
+                Ok(format!("Sent the prompt to {}.", self.workers.send(id, &text)?))
             }
             _ => Ok(format!("Stopped {}.", self.workers.stop(str_arg(args, "session_id")?)?)),
         }
@@ -287,6 +309,16 @@ impl Control {
         let this = self.clone();
         blocking(move || this.workers.send(&session_id, &text)).await??;
         Ok(())
+    }
+
+    /// The island's "Message this session": one command for every session. A session Session Buddy
+    /// started takes the text as its next prompt, any other running session gets it queued.
+    pub async fn user_message(self: &Arc<Self>, session_id: String, text: String) -> Result<(), String> {
+        let unmanaged = self.hub.store.lock().unwrap().get(&session_id).is_some_and(|s| !s.managed);
+        if unmanaged {
+            return self.hub.queue_message(&session_id, &text).map(|_| ());
+        }
+        self.user_send(session_id, text).await
     }
 
     pub async fn user_stop(self: &Arc<Self>, session_id: String) -> Result<(), String> {
@@ -622,12 +654,10 @@ mod tests {
     #[tokio::test]
     async fn only_managed_sessions_can_be_steered() {
         let r = rig(vec![agent("bbbbbbb2", Some(2), "idle", "interactive-ish", &r_root())], 3);
-        for tool in ["send_prompt", "stop_session"] {
-            let reply = r.control.clone().handle(approve_args(tool, json!({"session_id": "bbbbbbb2-full", "text": "hi"}))).await;
-            let d: Value = serde_json::from_str(&text_of(&reply)).unwrap();
-            assert_eq!(d["behavior"], "deny", "{tool}");
-            assert!(d["message"].as_str().unwrap().contains("Only those"));
-        }
+        let reply = r.control.clone().handle(approve_args("stop_session", json!({"session_id": "bbbbbbb2-full"}))).await;
+        let d: Value = serde_json::from_str(&text_of(&reply)).unwrap();
+        assert_eq!(d["behavior"], "deny");
+        assert!(d["message"].as_str().unwrap().contains("Only those"));
         let reply = r.control.clone().handle(approve_args("stop_session", json!({"session_id": "nope"}))).await;
         assert!(text_of(&reply).contains("deny"));
         assert!(r.hub.actions().is_empty());
@@ -743,5 +773,85 @@ mod tests {
     fn finish_only_touches_the_folder_of_a_start() {
         let args = json!({"session_id": "s", "text": "t"});
         assert_eq!(finish(&args, &json!({"allow": true, "folder": "/nonexistent"})).unwrap(), args);
+    }
+
+    fn live_session(r: &Rig, id: &str) {
+        r.hub.store.lock().unwrap().apply_hook(&json!({"hook_event_name": "SessionStart", "session_id": id, "cwd": "/p/Nexa"}), 1);
+    }
+
+    fn queued(r: &Rig, id: &str) -> Vec<(String, String)> {
+        let st = r.hub.store.lock().unwrap();
+        st.get(id).unwrap().messages.0.iter().map(|m| (m.text.clone(), format!("{:?}", m.state))).collect()
+    }
+
+    #[tokio::test]
+    async fn send_prompt_to_another_session_is_confirmed_then_queued() {
+        let r = rig(vec![], 3);
+        live_session(&r, "s1");
+        let c = r.control.clone();
+        let task = tokio::spawn(async move { c.handle(approve_args("send_prompt", json!({"session_id": "s1", "text": "use tabs"}))).await });
+        let card = wait_for_action(&r.hub).await;
+        assert_eq!(card.title, "Send a message");
+        assert_eq!(card.body.as_deref(), Some("use tabs"));
+        assert!(queued(&r, "s1").is_empty(), "nothing is queued before the yes");
+        r.hub.answer(&card.request_id, &json!({"allow": true})).unwrap();
+        let d: Value = serde_json::from_str(&text_of(&task.await.unwrap())).unwrap();
+        assert_eq!(d["behavior"], "allow");
+        let run = r.control.clone().handle(json!({"tool": "send_prompt", "args": d["updatedInput"].clone()})).await;
+        assert_eq!(run["ok"], true, "{run}");
+        assert_eq!(queued(&r, "s1"), [("use tabs".to_string(), "Queued".to_string())]);
+        assert!(r.cli.calls.lock().unwrap().is_empty(), "no CLI call for an unmanaged session");
+    }
+
+    #[tokio::test]
+    async fn an_unconfirmed_message_is_not_queued() {
+        let r = rig(vec![], 3);
+        live_session(&r, "s1");
+        let run = r.control.clone().handle(json!({"tool": "send_prompt", "args": {"session_id": "s1", "text": "sneaky"}})).await;
+        assert_eq!(run["ok"], false);
+        assert!(queued(&r, "s1").is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_card_for_a_message_that_cannot_be_queued() {
+        let r = rig(vec![], 3);
+        for input in [json!({"session_id": "ghost", "text": "hi"}), json!({"session_id": "s1", "text": "  "})] {
+            live_session(&r, "s1");
+            let reply = r.control.clone().handle(approve_args("send_prompt", input)).await;
+            assert!(text_of(&reply).contains("deny"));
+        }
+        for i in 0..5 {
+            r.hub.queue_message("s1", &format!("m{i}")).unwrap();
+        }
+        let reply = r.control.clone().handle(approve_args("send_prompt", json!({"session_id": "s1", "text": "sixth"}))).await;
+        assert!(text_of(&reply).contains("already waiting"));
+        assert!(r.hub.actions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_managed_session_still_takes_the_prompt_through_the_worker() {
+        let r = rig(vec![agent("c91b09c1", None, "idle", "Buddy: Nexa", &r_root())], 3);
+        live_session(&r, "c91b09c1-full");
+        let d = approve_with(&r, "send_prompt", json!({"session_id": "c91b09c1-full", "text": "next"}), json!({"allow": true})).await;
+        let run = r.control.clone().handle(json!({"tool": "send_prompt", "args": d["updatedInput"].clone()})).await;
+        assert_eq!(text_of(&run), "Sent the prompt to Nexa.");
+        assert!(queued(&r, "c91b09c1-full").is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_island_message_command_picks_the_path_by_session_kind() {
+        let r = rig(vec![agent("c91b09c1", None, "idle", "Buddy: Nexa", &r_root())], 3);
+        live_session(&r, "s1");
+        r.control.user_message("s1".into(), "hello\u{7}".into()).await.unwrap();
+        assert_eq!(queued(&r, "s1"), [("hello".to_string(), "Queued".to_string())]);
+
+        assert!(r.control.user_message("s1".into(), "".into()).await.unwrap_err().contains("empty"));
+        assert!(r.control.user_message("gone".into(), "hi".into()).await.unwrap_err().contains("Only those"), "unknown id: the worker path's error");
+
+        live_session(&r, "c91b09c1-full");
+        r.hub.store.lock().unwrap().mark_managed("c91b09c1-full");
+        r.control.user_message("c91b09c1-full".into(), "go on".into()).await.unwrap();
+        assert!(queued(&r, "c91b09c1-full").is_empty(), "managed: direct prompt, no queue");
+        assert_eq!(r.cli.calls.lock().unwrap().last().unwrap()[0], "--bg");
     }
 }

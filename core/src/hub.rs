@@ -15,6 +15,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::actions::ActionRequest;
+use crate::messages::Message;
 use crate::now_ms;
 use crate::store::{Cue, Store};
 
@@ -104,6 +105,19 @@ impl Hub {
         let _ = self.tools.set(handler);
     }
 
+    /// Queues a message for a running session (see `Store::queue_message`) and refreshes the island.
+    pub fn queue_message(&self, session_id: &str, text: &str) -> Result<Message, String> {
+        let message = self.store.lock().unwrap().queue_message(session_id, text, now_ms())?;
+        (self.notify)(Vec::new());
+        Ok(message)
+    }
+
+    pub fn cancel_message(&self, session_id: &str, message_id: &str) -> Result<(), String> {
+        self.store.lock().unwrap().cancel_message(session_id, message_id)?;
+        (self.notify)(Vec::new());
+        Ok(())
+    }
+
     /// The confirmations waiting for the user, oldest first.
     pub fn actions(&self) -> Vec<ActionRequest> {
         self.actions.lock().unwrap().clone()
@@ -173,6 +187,11 @@ impl Hub {
             return;
         };
 
+        if kind == "message" {
+            self.serve_message(&payload, &mut wr).await;
+            return;
+        }
+
         let budget = if kind == "permission" { self.wait_permission } else { self.wait_long };
         let id = format!("r{}", self.counter.fetch_add(1, Ordering::Relaxed));
         let (tx, mut rx) = mpsc::channel::<Reply>(8);
@@ -191,6 +210,26 @@ impl Hub {
             let _ = wr.write_all(format!("{line}\n").as_bytes()).await;
             let _ = wr.flush().await;
         }
+    }
+
+    /// The immediate answer for a Pre/PostToolUse or Stop the relay waits on: `{"messages": [...]}`,
+    /// empty when nothing is queued. The texts are marked delivered before they are written; if the
+    /// relay is already gone they go back to the queue.
+    async fn serve_message<W: AsyncWrite + Unpin>(&self, payload: &Value, wr: &mut W) {
+        let session = payload.get("session_id").and_then(Value::as_str).unwrap_or_default().to_string();
+        let (cues, taken) = self.store.lock().unwrap().apply_hook_delivering(payload, now_ms());
+        (self.notify)(cues);
+        let texts: Vec<&str> = taken.iter().map(|(_, text)| text.as_str()).collect();
+        let reply = format!("{}\n", json!({"messages": texts}));
+        let sent = wr.write_all(reply.as_bytes()).await.is_ok() && wr.flush().await.is_ok();
+        if taken.is_empty() {
+            return;
+        }
+        if !sent {
+            let ids: Vec<String> = taken.into_iter().map(|(id, _)| id).collect();
+            self.store.lock().unwrap().restore_messages(&session, &ids);
+        }
+        (self.notify)(Vec::new());
     }
 
     /// Two waits: a short one for "the card is on screen" (passed on to the relay as
@@ -586,5 +625,67 @@ mod tests {
         let (task, _c) = send(&h, json!({"sb_kind":"hook","hook_event_name":"SessionStart","session_id":"s1"})).await;
         task.await.unwrap();
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    fn tool_event(event: &str) -> Value {
+        json!({"sb_kind":"hook","sb_wait":"message","hook_event_name":event,"session_id":"s1","cwd":"/p/x","tool_name":"Bash","tool_input":{"command":"ls"}})
+    }
+
+    async fn live_session(h: &Arc<Hub>) {
+        let (task, _c) = send(h, json!({"sb_kind":"hook","sb_wait":null,"hook_event_name":"SessionStart","session_id":"s1","cwd":"/p/x"})).await;
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_message_wait_answers_at_once_with_nothing() {
+        let h = hub();
+        live_session(&h).await;
+        let (task, client) = send(&h, tool_event("PreToolUse")).await;
+        let lines = tokio::time::timeout(Duration::from_millis(300), read_lines(client)).await.expect("answers immediately");
+        assert_eq!(lines, vec![r#"{"messages":[]}"#.to_string()]);
+        task.await.unwrap();
+        assert!(h.pending.lock().unwrap().is_empty(), "no pending interaction");
+        assert!(h.store.lock().unwrap().get("s1").unwrap().pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_queued_message_is_answered_once() {
+        let h = hub();
+        live_session(&h).await;
+        h.store.lock().unwrap().queue_message("s1", "use tabs", now_ms()).unwrap();
+        let (t1, c1) = send(&h, tool_event("PreToolUse")).await;
+        let (t2, c2) = send(&h, tool_event("PostToolUse")).await;
+        let mut got = read_lines(c1).await;
+        got.extend(read_lines(c2).await);
+        t1.await.unwrap();
+        t2.await.unwrap();
+        got.sort();
+        assert_eq!(got, vec![r#"{"messages":["use tabs"]}"#.to_string(), r#"{"messages":[]}"#.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_message_whose_answer_cannot_be_written_goes_back_to_the_queue() {
+        let h = hub();
+        live_session(&h).await;
+        h.store.lock().unwrap().queue_message("s1", "hello", now_ms()).unwrap();
+        let (client, server) = duplex(1 << 16);
+        let mut client = client;
+        client.write_all(format!("{}\n", tool_event("PreToolUse")).as_bytes()).await.unwrap();
+        drop(client);
+        h.clone().serve(server).await;
+        let st = h.store.lock().unwrap();
+        let m = &st.get("s1").unwrap().messages.0[0];
+        assert_eq!(m.state, crate::messages::MessageState::Queued);
+    }
+
+    #[tokio::test]
+    async fn a_stop_message_wait_without_a_message_still_finishes_the_turn() {
+        let h = hub();
+        live_session(&h).await;
+        let stop = json!({"sb_kind":"hook","sb_wait":"message","hook_event_name":"Stop","session_id":"s1","last_assistant_message":"Done."});
+        let (task, client) = send(&h, stop).await;
+        assert_eq!(read_lines(client).await, vec![r#"{"messages":[]}"#.to_string()]);
+        task.await.unwrap();
+        assert_eq!(h.store.lock().unwrap().get("s1").unwrap().status, crate::store::Status::Finished);
     }
 }

@@ -38,6 +38,18 @@ export type Interaction =
   | { kind: "question"; requestId: string; questions: Question[]; deadline: number }
   | { kind: "reply"; requestId: string; message: string; deadline: number };
 
+export type MessageState = "queued" | "delivered" | "cancelled" | "expired";
+
+/** A message the user queued for a session (the last few, newest last). */
+export interface SessionMessage {
+  id: string;
+  text: string;
+  state: MessageState;
+  queuedAt: number;
+  deliveredAt: number | null;
+  via: "mid-turn" | "stop" | null;
+}
+
 export interface Session {
   id: string;
   project: string;
@@ -64,6 +76,7 @@ export interface Session {
   plan: string | null;
   /** Started by Buddy from the chat: a background session that accepts prompts from the island. */
   managed: boolean;
+  messages: SessionMessage[];
 }
 
 /** A confirmation without a session: the chat wants to act (start a session). Answered with `{ allow, folder?, host? }`. */

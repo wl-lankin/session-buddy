@@ -6,6 +6,7 @@ pub mod bootstrap;
 pub mod branch;
 pub mod claude_settings;
 pub mod hub;
+pub mod messages;
 pub mod steps;
 pub mod store;
 pub mod usage;

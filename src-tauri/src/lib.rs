@@ -179,6 +179,19 @@ async fn worker_send(control: State<'_, Arc<Control>>, session_id: String, text:
     control.user_send(session_id, text).await
 }
 
+/// "Message this session": a session Session Buddy started gets a direct prompt, any other running
+/// session gets the text queued for its next hook. The user's own text: no confirmation card.
+#[tauri::command]
+async fn session_message_send(control: State<'_, Arc<Control>>, session_id: String, text: String) -> Result<(), String> {
+    let control = control.inner().clone();
+    control.user_message(session_id, text).await
+}
+
+#[tauri::command]
+fn session_message_cancel(shared: State<Shared>, session_id: String, message_id: String) -> Result<(), String> {
+    shared.hub.cancel_message(&session_id, &message_id)
+}
+
 #[tauri::command]
 async fn worker_stop(control: State<'_, Arc<Control>>, session_id: String) -> Result<(), String> {
     let control = control.inner().clone();
@@ -466,7 +479,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release,
             install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app, chat::chat_send, chat::chat_wake, chat::chat_interrupt,
-            chat::chat_reset, chat::chat_status, chat::chat_models, worker_send, worker_stop, worker_attach, pick_folder
+            chat::chat_reset, chat::chat_status, chat::chat_models, worker_send, session_message_send, session_message_cancel, worker_stop, worker_attach, pick_folder
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

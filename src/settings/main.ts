@@ -18,7 +18,7 @@ const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "
 // &ollama=down|empty picks the fake Ollama server's answer for the Test button.
 // &roots=2 lists two project folders in the Control block.
 const DEMO_ROOTS = new URLSearchParams(location.search).get("roots") === "2" ? ["/Users/alex/Projects", "/Users/alex/Work/client-sites"] : [];
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.6" };
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.7" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,

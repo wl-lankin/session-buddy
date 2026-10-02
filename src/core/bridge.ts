@@ -46,8 +46,8 @@ async function attempt<T>(cmd: string, args?: Record<string, unknown>): Promise<
   }
 }
 
-/** The worker commands report a failure as an error string, as a rejected call or as the returned value. */
-async function workerCall(cmd: string, args: Record<string, unknown>): Promise<string | null> {
+/** The worker and message commands report a failure as an error string, as a rejected call or as the returned value. */
+async function errorCall(cmd: string, args: Record<string, unknown>): Promise<string | null> {
   const r = await attempt<unknown>(cmd, args);
   if (!r.ok) return r.error;
   return typeof r.value === "string" && r.value ? r.value : null;
@@ -92,9 +92,10 @@ export const Bridge = {
   quit: () => call<void>("quit_app"),
   /** The native folder dialog; null when it was cancelled. */
   pickFolder: async (startDir?: string): Promise<string | null> => (await call<string | null>("pick_folder", startDir ? { startDir } : undefined)) ?? null,
-  /** Resolves to an error message, or null when the prompt went to the worker. */
-  workerSend: (sessionId: string, text: string) => workerCall("worker_send", { sessionId, text }),
-  workerStop: (sessionId: string) => workerCall("worker_stop", { sessionId }),
+  /** Resolves to an error message, or null when the text was queued (or, for a managed session, sent directly). */
+  sessionMessageSend: (sessionId: string, text: string) => errorCall("session_message_send", { sessionId, text }),
+  sessionMessageCancel: (sessionId: string, messageId: string) => errorCall("session_message_cancel", { sessionId, messageId }),
+  workerStop: (sessionId: string) => errorCall("worker_stop", { sessionId }),
   chatSend: (text: string) => attempt<void>("chat_send", { text }),
   chatWake: () => call<void>("chat_wake"),
   chatInterrupt: () => call<void>("chat_interrupt"),

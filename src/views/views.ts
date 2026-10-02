@@ -27,9 +27,14 @@ export interface ChatActions {
 }
 
 export interface WorkerActions {
+  /** Resolves to an error message, or null on success. */
+  stop(sessionId: string): Promise<string | null>;
+}
+
+export interface MessageActions {
   /** Resolve to an error message, or null on success. */
   send(sessionId: string, text: string): Promise<string | null>;
-  stop(sessionId: string): Promise<string | null>;
+  cancel(sessionId: string, messageId: string): Promise<string | null>;
 }
 
 export interface ViewActions {
@@ -64,6 +69,7 @@ export interface ViewActions {
   /** The native folder dialog, opened at `startDir`; null when cancelled. */
   pickFolder(startDir?: string): Promise<string | null>;
   worker: WorkerActions;
+  message: MessageActions;
 }
 
 export interface ViewHost {

@@ -1,8 +1,9 @@
 //! sb-relay: called by Claude Code for every hook event (`sb-relay hook <Event>`),
 //! as the status line (`sb-relay statusline [--quiet]`) and as the chat's MCP server (`sb-relay mcp`). It forwards the
 //! JSON to session-buddy and, for the three blocking cases, prints the human's
-//! answer. If the app is closed, slow or crashed, it prints nothing and exits:
-//! Claude Code is never blocked.
+//! answer. Tool events and Stop also wait ~100 ms for a message the user queued
+//! for the session. If the app is closed, slow or crashed, it prints nothing and
+//! exits: Claude Code is never blocked.
 
 mod mcp;
 mod output;

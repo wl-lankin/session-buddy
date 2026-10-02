@@ -15,6 +15,7 @@ import { BotEngine, hexToRGB } from "../buddy/engine";
 import { Greeting } from "../buddy/greeting";
 import type { ChatAction, ChatEvent } from "../model/chat";
 import { FINISH_CARD_S, mergeFinish, planFinish, playsSound, type FinishItem } from "../model/finish";
+import { newlyDelivered } from "../model/messages";
 import { newPlan, planSession } from "../model/plan";
 import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";
 import { newActionIds } from "../model/actions";
@@ -185,13 +186,20 @@ export class Island {
       },
       pickFolder: (startDir) => Bridge.pickFolder(startDir),
       worker: {
+        stop: async (id) => {
+          const error = await Bridge.workerStop(id);
+          Sound.play(error ? "error" : "blip");
+          return error;
+        },
+      },
+      message: {
         send: async (id, text) => {
-          const error = await Bridge.workerSend(id, text);
+          const error = await Bridge.sessionMessageSend(id, text);
           Sound.play(error ? "error" : "send");
           return error;
         },
-        stop: async (id) => {
-          const error = await Bridge.workerStop(id);
+        cancel: async (id, messageId) => {
+          const error = await Bridge.sessionMessageCancel(id, messageId);
           Sound.play(error ? "error" : "blip");
           return error;
         },
@@ -461,6 +469,7 @@ export class Island {
 
   onSnapshot(snap: Snapshot) {
     const prev = State.sessions;
+    const prevAll = State.snapshot.sessions;
     const prevActions = State.snapshot.actions;
     State.snapshot = snap.actions ? snap : { ...snap, actions: [] };
     const actions = State.snapshot.actions;
@@ -468,6 +477,10 @@ export class Island {
     const { focusId, newlyPending } = resolveFocus(State.focusId, prev, State.sessions);
     State.focusId = focusId;
     const planned = newPlan(prev, snap.sessions);
+    if (newlyDelivered(prevAll, snap.sessions).length) {
+      Sound.play("tick");
+      this.engine.blink();
+    }
 
     const queue = pendingQueue(snap.sessions, focusId);
     const waiting = queue.length + actions.length;

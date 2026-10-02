@@ -188,8 +188,10 @@ export function fakeChat(cmd: string, args?: Record<string, unknown>): { value: 
       return { value: undefined };
     case "pick_folder":
       return { value: PICKS[picked++ % PICKS.length] };
-    case "worker_send":
+    case "session_message_send":
       return { value: /fail/i.test(String(args?.text ?? "")) ? "That session is busy with another prompt." : null };
+    case "session_message_cancel":
+      return { value: null };
     case "worker_stop":
       return { value: null };
     case "answer": {

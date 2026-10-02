@@ -8,7 +8,7 @@ import {
 const session = (p: Partial<Session> = {}): Session => ({
   id: "a", project: "pushdocs", cwd: "/p", branch: "PDD-1", termProgram: null, model: "Opus 5.5", status: "working", statusSince: 0,
   lastPrompt: "fix the 409", lastMessage: "Done with the fix.", steps: [], agents: [], background: [], pending: [], startedAt: 0,
-  lastEventAt: 0, pid: null, live: true, plan: null, managed: false,
+  lastEventAt: 0, pid: null, live: true, plan: null, managed: false, messages: [],
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: null, contextTokens: null, contextSize: null, costUsd: null }, ...p,
 });
 

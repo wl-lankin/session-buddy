@@ -7,6 +7,7 @@ export interface PickerSettings {
   chatProvider: ChatProvider;
   chatModel: string;
   chatOllamaModel: string;
+  ollamaEnabled: boolean;
 }
 
 /** What the last `chat_models` call said; `idle` until the menu was opened once. */
@@ -53,7 +54,8 @@ function claudeAlias(model: string): string {
 
 /** The provider and model name the settings select (what the header shows). */
 export function selectedModel(s: PickerSettings): { provider: ChatProvider; model: string } {
-  return { provider: s.chatProvider, model: s.chatProvider === "ollama" ? s.chatOllamaModel : s.chatModel };
+  const ollama = s.chatProvider === "ollama" && s.ollamaEnabled;
+  return { provider: ollama ? "ollama" : "claude", model: ollama ? s.chatOllamaModel : s.chatModel };
 }
 
 export function localStatusText(l: LocalModels): string {
@@ -67,7 +69,7 @@ export function localStatusText(l: LocalModels): string {
 
 export function pickerRows(s: PickerSettings, local: LocalModels): PickerRow[] {
   const alias = claudeAlias(s.chatModel);
-  const onClaude = s.chatProvider === "claude";
+  const onClaude = !(s.chatProvider === "ollama" && s.ollamaEnabled);
   const known = CLAUDE_CHOICES.some((c) => c.model === alias);
   const rows: PickerRow[] = [{ type: "group", label: CLAUDE_GROUP }];
   const claude = (model: string, label: string, note: string): PickerRow => ({
@@ -77,6 +79,7 @@ export function pickerRows(s: PickerSettings, local: LocalModels): PickerRow[] {
   for (const c of CLAUDE_CHOICES) rows.push(claude(c.model, modelLabel("claude", c.model), c.note));
   // A full model id set earlier still needs a place for the check mark.
   if (!known) rows.push(claude(alias, alias, "custom id"));
+  if (!s.ollamaEnabled) return rows;
 
   rows.push({ type: "group", label: LOCAL_GROUP }, { type: "status", text: localStatusText(local), tone: local.state === "down" ? "down" : "calm" });
   if (local.state === "down") rows.push({ type: "retry" });

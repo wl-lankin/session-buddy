@@ -337,7 +337,7 @@ export function buildChatView(actions: ViewActions): ViewHost {
     actions.wantKeyboard(true);
     document.addEventListener("pointerdown", outside, true);
     window.addEventListener("blur", leave);
-    if (modelsStale(local, loadedAt, Date.now())) loadLocal();
+    if (State.settings.ollamaEnabled && modelsStale(local, loadedAt, Date.now())) loadLocal();
     menuItems[initialRow(menuRows)]?.focus();
   }
 

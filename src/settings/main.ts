@@ -263,6 +263,14 @@ function chatSection(): HTMLElement {
     });
   });
 
+  const ollamaRow = row("Ollama server", h("span", { class: "field" }, url, test), "address of a local or network Ollama");
+  const showOllama = (on: boolean) => {
+    ollamaRow.style.display = on ? "" : "none";
+    if (!on) resultRow.style.display = "none";
+    else resultRow.style.display = "";
+  };
+  showOllama(settings.ollamaEnabled);
+
   return card(
     "Chat",
     ICONS.bubble,
@@ -272,7 +280,8 @@ function chatSection(): HTMLElement {
     row("Stop after idle", numberInput(() => settings.chatIdleMinutes, (v) => (settings.chatIdleMinutes = v), 0, 240, 1, true, (v) => (v === 0 ? "Never" : "minutes")), "idle time before the background process stops"),
     cli,
     row("Claude CLI path", path, "optional, only to override the automatic detection"),
-    row("Ollama server", h("span", { class: "field" }, url, test), "address of a local or network Ollama"),
+    row("Ollama (local models)", toggle(() => settings.ollamaEnabled, (v) => { settings.ollamaEnabled = v; showOllama(v); }), "off: the model menu shows only Claude and nothing tries to reach Ollama"),
+    ollamaRow,
     resultRow,
     ...controlBlock(),
   );

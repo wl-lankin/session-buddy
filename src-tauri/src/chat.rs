@@ -120,6 +120,9 @@ fn launch(s: &Settings, relay: &Path) -> Result<Launch, String> {
             s.chat_model.clone()
         }
         Provider::Ollama => {
+            if !s.ollama_enabled {
+                return Err("Ollama is turned off in Settings".into());
+            }
             if s.chat_ollama_model.is_empty() {
                 return Err("Choose an Ollama model in Settings".into());
             }
@@ -742,7 +745,11 @@ async fn fetch_models(base: &str) -> OllamaModels {
 
 #[tauri::command]
 pub async fn chat_models(app: AppHandle, url: Option<String>) -> OllamaModels {
-    let raw = url.unwrap_or_else(|| settings_of(&app).chat_ollama_url);
+    let s = settings_of(&app);
+    if url.is_none() && !s.ollama_enabled {
+        return OllamaModels { reachable: false, models: Vec::new(), error: Some("Ollama is turned off in Settings".into()) };
+    }
+    let raw = url.unwrap_or(s.chat_ollama_url);
     match clean_url(&raw) {
         Ok(base) => fetch_models(&base).await,
         Err(error) => OllamaModels { reachable: false, models: Vec::new(), error: Some(error) },
@@ -892,7 +899,7 @@ mod tests {
     }
 
     fn ollama(model: &str, url: &str) -> Settings {
-        Settings { chat_provider: "ollama".into(), chat_ollama_model: model.into(), chat_ollama_url: url.into(), ..Settings::default() }
+        Settings { chat_provider: "ollama".into(), ollama_enabled: true, chat_ollama_model: model.into(), chat_ollama_url: url.into(), ..Settings::default() }
     }
 
     fn after<'a>(args: &'a [String], flag: &str) -> &'a str {
@@ -932,6 +939,8 @@ mod tests {
 
     #[test]
     fn invalid_settings_do_not_launch() {
+        let off = Settings { ollama_enabled: false, ..ollama("qwen2.5:7b", "http://localhost:11434") };
+        assert_eq!(launch(&off).unwrap_err(), "Ollama is turned off in Settings");
         assert_eq!(launch(&ollama("", "http://localhost:11434")).unwrap_err(), "Choose an Ollama model in Settings");
         assert!(launch(&ollama("a b", "http://localhost:11434")).is_err());
         assert!(launch(&ollama("m", "ftp://localhost")).is_err());
@@ -985,7 +994,7 @@ mod tests {
     }
 
     fn control(provider: &str) -> Settings {
-        Settings { chat_mode: "control".into(), chat_provider: provider.into(), chat_ollama_model: "qwen2.5:7b".into(), ..Settings::default() }
+        Settings { chat_mode: "control".into(), chat_provider: provider.into(), ollama_enabled: true, chat_ollama_model: "qwen2.5:7b".into(), ..Settings::default() }
     }
 
     #[test]

@@ -58,6 +58,7 @@ h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 8px; font-size: 1
 .note.tight { margin: -4px 0 6px; font-size: 12px; }
 .msg.calm { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 6px; color: var(--dim-2); word-break: normal; }
 .msg.calm.down { color: #ffb4bb; }
+.msg.calm.good { color: var(--green); }
 
 .kv { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; font-size: 12px; }
 .kv .k { width: 92px; color: var(--dim-3); flex: 0 0 auto; }

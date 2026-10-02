@@ -11,6 +11,7 @@ import { h, svg } from "../views/dom";
 import { headerBuddy, type HeaderBuddy } from "./buddy";
 import { addRoot, DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, removeRoot, rootParts, secondsLabel, SESSION_HOSTS } from "./helpers";
 import { buddyMark } from "./mark";
+import { checkFailedText, checkSummary, progressPercent } from "../model/update";
 import type { SettingsEvent } from "./reactions";
 
 // ?demo=1 in a plain browser: a fake boot result for the README screenshots.
@@ -18,7 +19,7 @@ const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "
 // &ollama=down|empty picks the fake Ollama server's answer for the Test button.
 // &roots=2 lists two project folders in the Control block.
 const DEMO_ROOTS = new URLSearchParams(location.search).get("roots") === "2" ? ["/Users/alex/Projects", "/Users/alex/Work/client-sites"] : [];
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.10" };
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.11" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,
@@ -277,6 +278,67 @@ function chatSection(): HTMLElement {
   );
 }
 
+/** The Updates card: the version, the automatic check, and a manual check that can install what it finds. */
+function updateSection(version: string): HTMLElement {
+  const result = h("span", { class: "test-text" });
+  const resultRow = h("div", { class: "msg calm" }, result);
+  const buttons = h("div", { class: "actions" });
+  const check = h("button", { type: "button", text: "Check now" });
+  let busy = false;
+  const show = (text: string, tone: "ok" | "offer" | "bad" | "plain" = "plain") => {
+    result.textContent = text;
+    resultRow.classList.toggle("down", tone === "bad");
+    resultRow.classList.toggle("good", tone === "ok" || tone === "offer");
+  };
+  const paint = (install: HTMLElement | null) => buttons.replaceChildren(check, ...(install ? [install] : []));
+
+  const install = () => {
+    busy = true;
+    check.disabled = true;
+    paint(null);
+    show("Downloading and installing ...");
+    tell({ kind: "update", result: "installing" });
+    void Bridge.updateInstall().then((error) => {
+      if (!error) return show("Restarting ...");
+      busy = false;
+      check.disabled = false;
+      show(`Update failed: ${error}`, "bad");
+      tell({ kind: "update", result: "error" });
+      paint(h("button", { type: "button", class: "primary", text: "Retry", onclick: install }));
+    });
+  };
+
+  check.addEventListener("click", () => {
+    if (busy) return;
+    check.disabled = true;
+    show("Checking ...");
+    paint(null);
+    void Bridge.updateCheck().then((r) => {
+      check.disabled = false;
+      const sum = r.ok ? checkSummary(r.value) : { tone: "bad" as const, text: checkFailedText(r.error) };
+      show(sum.text, sum.tone);
+      tell({ kind: "update", result: sum.tone === "bad" ? "error" : sum.tone === "offer" ? "available" : "latest" });
+      paint(sum.tone === "offer" ? h("button", { type: "button", class: "primary", text: "Install and restart", onclick: install }) : null);
+    });
+  });
+  paint(null);
+  // Progress goes to the island window; this only shows it if the backend also sends it here.
+  void onEvent<{ downloaded: number; total: number | null }>("update-progress", (p) => {
+    const pct = progressPercent(p.downloaded, p.total);
+    if (busy && pct != null) show(`Downloading ${pct}% ...`);
+  });
+
+  return card(
+    "Updates",
+    ICONS.arrowDown,
+    h("p", { class: "note", text: "Session Buddy looks for a newer release on GitHub. It never installs by itself: the island shows a notice, and you choose when to install." }),
+    line("Version", `v${version.replace(/^v/, "")}`),
+    row("Check for updates automatically", toggle(() => settings.updateCheck, (v) => (settings.updateCheck = v)), "once at start and now and then"),
+    buttons,
+    resultRow,
+  );
+}
+
 const AUTHOR_URL = "https://wolfgang-linz.de";
 const COUCOU_URL = "https://github.com/Louis-CFM/coucou";
 
@@ -418,6 +480,7 @@ async function main() {
         row("Screen", screen),
       ),
       chatSection(),
+      updateSection(boot.version),
       card(
         "Sessions",
         ICONS.timer,

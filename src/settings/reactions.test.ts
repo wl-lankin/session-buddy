@@ -34,6 +34,17 @@ describe("local model reactions", () => {
   });
 });
 
+describe("update reactions", () => {
+  it("is happy about a new version and about being up to date", () => {
+    expect(reactionFor({ kind: "update", result: "available" })?.emote).toBe("happy");
+    expect(reactionFor({ kind: "update", result: "latest" })?.emote).toBe("happy");
+  });
+  it("works while installing and shows the error face on failure", () => {
+    expect(reactionFor({ kind: "update", result: "installing" })?.state).toBe("working");
+    expect(reactionFor({ kind: "update", result: "error" })?.state).toBe("error");
+  });
+});
+
 describe("restingState", () => {
   it("sleeps while sound is off", () => {
     expect(restingState(false)).toBe("sleeping");

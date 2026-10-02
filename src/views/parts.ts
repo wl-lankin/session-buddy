@@ -101,3 +101,24 @@ export function rowNatural(row: HTMLElement, leaves: string): number {
   const hidden = [...row.querySelectorAll<HTMLElement>(leaves)].reduce((sum, l) => sum + Math.max(0, l.scrollWidth - l.clientWidth), 0);
   return taken + hidden;
 }
+
+/** The "Update 1.0.11" pill (strip and compact card): hidden while there is no text. */
+export function updatePill(onClick: () => void): { el: HTMLButtonElement; set(text: string | null): void; shown(): boolean } {
+  const el = h("button", {
+    class: "upd-pill",
+    title: "Show the update",
+    style: "display:none",
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      onClick();
+    },
+  });
+  return {
+    el,
+    set(text) {
+      if (el.textContent !== (text ?? "")) el.textContent = text ?? "";
+      el.style.display = text ? "" : "none";
+    },
+    shown: () => el.style.display !== "none",
+  };
+}

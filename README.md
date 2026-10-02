@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.10](https://img.shields.io/badge/version-1.0.10-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.11](https://img.shields.io/badge/version-1.0.11-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
@@ -44,8 +44,8 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/session-buddy/releases/latest)**:
 
-- **Windows**: `Session Buddy_1.0.10_x64-setup.exe`. Installs for the current user, no admin needed.
-- **macOS**: `Session Buddy_1.0.10_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
+- **Windows**: `Session Buddy_1.0.11_x64-setup.exe`. Installs for the current user, no admin needed.
+- **macOS**: `Session Buddy_1.0.11_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
 The builds are not code-signed yet, so the first start needs one extra click:
 
@@ -53,6 +53,10 @@ The builds are not code-signed yet, so the first start needs one extra click:
 - **macOS Gatekeeper**: open the app once and click **Done**, then System Settings > Privacy & Security > **Open Anyway** (macOS 15 and later no longer offer right-click > Open). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
 
 **Upgrading on Windows from an older "session-buddy" build?** Uninstall the old app first (Settings > Apps), because the install folder name changed. Your hooks and settings stay where they are.
+
+### Updates
+
+The app checks GitHub Releases for a newer version (shortly after start, then every 6 hours) and shows a notice on the island. It installs only when you click: the download is signature-verified, then the app restarts. Turn the automatic check off in Settings. The very first install is still manual (the steps above), and builds from source do not self-update.
 
 ### Build from source
 
@@ -63,7 +67,7 @@ npm install
 npm run pack
 ```
 
-- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.10_x64-setup.exe`.
+- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.11_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
 On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
@@ -104,6 +108,7 @@ Claude Code runs a tiny relay, `sb-relay`, for every hook event and as the statu
 
 - No telemetry, no analytics, no accounts.
 - Without the chat, the only network call is the usage endpoint (`GET https://api.anthropic.com/api/oauth/usage`), with Claude Code's own login token.
+- Unless you turn update checks off in Settings, the app also fetches `https://github.com/wl-lankin/session-buddy/releases/latest/download/latest.json` (a plain GET, no token, no identifiers) after start and every 6 hours. A download only starts when you click Install.
 - That token is read fresh each time and never stored or logged.
 - Diffs and the end of command output (at most 1500 characters per stream) only go from the relay to the app and are kept in memory, never written to disk.
 - The chat is off until you turn it on. Then it starts the `claude` CLI in the background with your own Claude Code login: your messages go to Anthropic like any Claude Code use, and count against your plan. With a local Ollama model nothing leaves your machine, and there is no web search. The chat can only use web search and web fetch, no file or shell tools, and nothing it says is written to disk.

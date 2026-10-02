@@ -4,6 +4,7 @@
 import type { ChatEvent, ChatState, ChatStatus } from "../model/chat";
 import type { ChatModels } from "./bridge";
 import { DEFAULT_SETTINGS, State } from "./state";
+import { fakeUpdate } from "./updatefake";
 
 type Emit = (e: ChatEvent) => void;
 
@@ -207,6 +208,6 @@ export function fakeChat(cmd: string, args?: Record<string, unknown>): { value: 
       setStatus("off");
       return { value: undefined };
     default:
-      return null;
+      return fakeUpdate(cmd);
   }
 }

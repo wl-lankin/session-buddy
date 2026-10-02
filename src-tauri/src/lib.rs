@@ -14,6 +14,7 @@ mod projects;
 mod settings;
 mod terminal;
 mod tray;
+mod updates;
 mod usage_poll;
 mod workers;
 
@@ -493,13 +494,15 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared)
         .manage(chat::Chat::default())
         .manage(control)
+        .manage(updates::Updates::default())
         .invoke_handler(tauri::generate_handler![
             boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release, focus_terminal,
             install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app, chat::chat_send, chat::chat_wake, chat::chat_interrupt,
-            chat::chat_reset, chat::chat_status, chat::chat_models, worker_send, session_message_send, session_message_cancel, worker_stop, worker_attach, pick_folder
+            chat::chat_reset, chat::chat_status, chat::chat_models, worker_send, session_message_send, session_message_cancel, worker_stop, worker_attach, pick_folder, updates::update_check, updates::update_install
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -524,6 +527,7 @@ pub fn run() {
             spawn_bootstrap(handle.clone());
             spawn_loops(handle.clone());
             usage_poll::spawn(handle.clone());
+            updates::spawn(handle.clone());
             tray::build(&handle)?;
             register_hotkey(&handle, &hotkey);
             Ok(())

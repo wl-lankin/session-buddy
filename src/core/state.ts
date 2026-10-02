@@ -5,6 +5,7 @@ import { EMPTY_SNAPSHOT, type Session, type Snapshot } from "./types";
 import { botStateFor, loudest, orderSessions, visibleSessions } from "../model/viewmodel";
 import type { FinishItem, FinishStyle } from "../model/finish";
 import { initialChat, type ChatModel } from "../model/chat";
+import { initialUpdate, type UpdateModel, type UpdateNote } from "../model/update";
 
 export interface Settings {
   soundEnabled: boolean;
@@ -42,6 +43,8 @@ export interface Settings {
   chatSessionHost: string;
   /** Plans from plan mode can be answered with feedback in the island; off keeps the read-only plan card. */
   planFromIsland: boolean;
+  /** The backend looks for a newer release by itself; installing always waits for a click. */
+  updateCheck: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -69,6 +72,7 @@ export const DEFAULT_SETTINGS: Settings = {
   chatMaxWorkers: 3,
   chatSessionHost: "background",
   planFromIsland: true,
+  updateCheck: true,
 };
 
 type Listener = () => void;
@@ -101,6 +105,12 @@ class AppState {
   /** The step whose change or output is unfolded (stepKey), or null. */
   stepOpen: string | null = null;
   settings: Settings = { ...DEFAULT_SETTINGS };
+  /** The running app's version (from boot); null until known. */
+  appVersion: string | null = null;
+  /** The release the backend found, and how far its install is (src/model/update.ts). */
+  update: UpdateModel = initialUpdate;
+  /** The short answer to a manual check ("latest version", an error); shown on the update card until the island closes. */
+  updateNote: UpdateNote | null = null;
   /** The chat transcript and status (src/model/chat.ts); lives for the whole app run. */
   chat: ChatModel = initialChat();
 

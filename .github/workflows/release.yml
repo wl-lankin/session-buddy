@@ -1,4 +1,7 @@
-# Builds the installers and attaches them to a draft GitHub release.
+# Builds the installers and the signed updater artifacts (latest.json, .sig files) and attaches
+# them to a draft GitHub release. The installed apps see the update once the draft is published.
+# createUpdaterArtifacts lives in tauri.updater.conf.json, passed only here, because it makes
+# `tauri build` demand the signing key and source builds have none.
 # Push a tag like v1.0.0 (normal release) or v1.0.0-beta.1 (prerelease), or run it
 # by hand with a tag name. The bundle version always comes from tauri.conf.json
 # (NSIS needs a numeric version, so a beta tag still ships 1.0.0).
@@ -24,9 +27,9 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
-            args: ""
+            args: "--config src-tauri/tauri.updater.conf.json"
           - platform: macos-latest
-            args: "--target universal-apple-darwin --config src-tauri/tauri.universal.conf.json"
+            args: "--target universal-apple-darwin --config src-tauri/tauri.updater.conf.json --config src-tauri/tauri.universal.conf.json"
     runs-on: ${{ matrix.platform }}
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -70,10 +73,14 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ env.TAG }}
           releaseName: "Session Buddy ${{ env.TAG }}"
-          releaseBody: "Unsigned builds. Windows: SmartScreen > More info > Run anyway. macOS: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`."
+          releaseBody: "Apps that already include the updater offer this version on the island and install it on one click (signature-checked). The first install of any machine is manual, and the installers are not code-signed, so it needs one extra step. Windows: SmartScreen > More info > Run anyway. macOS: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`."
           releaseDraft: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
           prerelease: ${{ contains(env.TAG, '-') }}
           args: ${{ matrix.args }}

@@ -49,12 +49,15 @@ const VIEW_HEIGHTS: Record<IslandViewName, number> = {
 /** The session view without its unfolded last answer. */
 export const VIEW_HEIGHT_SESSION = VIEW_HEIGHTS.session;
 
+/** The one-line answer of a manual update check: as low as the card gets, Buddy in its middle. */
+export const NOTE_CARD_H = 72;
+
 /** Views whose height follows their content (ViewHost.measure), within [min, max]. */
 const MEASURED: Partial<Record<IslandViewName, [number, number]>> = {
   session: [VIEW_HEIGHTS.session, 600],
   interaction: [200, CARD_MAX_H],
   finished: [VIEW_HEIGHTS.finished, CARD_MAX_H],
-  update: [VIEW_HEIGHTS.update, CARD_MAX_H],
+  update: [NOTE_CARD_H, CARD_MAX_H],
 };
 
 /** Natural island size. `measured` is the view's content height, `expandedWidth` the auto width (src/model/size.ts). */
@@ -80,7 +83,7 @@ export function islandSize(
 
 export interface BotPlacement { cx: number; cy: number; diameter: number; opacity: number }
 
-export function botPosition(mode: IslandMode, view: IslandViewName): BotPlacement {
+export function botPosition(mode: IslandMode, view: IslandViewName, noteCard = false): BotPlacement {
   switch (mode) {
     case "strip":
       return { cx: 18, cy: 14, diameter: 16, opacity: 1 };
@@ -90,6 +93,7 @@ export function botPosition(mode: IslandMode, view: IslandViewName): BotPlacemen
       if (view === "greeting") return { cx: 320, cy: 90, diameter: 0, opacity: 0 };
       // The session view's tab row spans the whole island: Buddy sits below it.
       if (view === "session") return { cx: 56, cy: 112, diameter: 58, opacity: 1 };
+      if (view === "update" && noteCard) return { cx: 56, cy: NOTE_CARD_H / 2, diameter: 58, opacity: 1 };
       return { cx: 56, cy: 96, diameter: 58, opacity: 1 };
   }
 }

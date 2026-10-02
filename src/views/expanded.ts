@@ -13,7 +13,8 @@ import { firstLine, fmtAgo, fmtPct, fmtReset, fmtTokens } from "../model/format"
 import { accountTitle, agentGroups, emailParts, extraView, finishedAgentLabel, FINISHED_AGENT_ROWS, modelName, oauthNote, recentClass, recentCount, rowLevel, statusGlyph, TAB_COMPACT_ABOVE } from "../model/viewmodel";
 import { accountWidth } from "../model/size";
 import { diffLines, stepKey } from "../model/stepdetail";
-import { bar, enlargeButton, keyed, pinButton, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
+import { bar, enlargeButton, keyed, managedMark, pinButton, linesChanged, rowNatural, sessionName, statusDot } from "./parts";
+import { cleanPrompt, isManaged, newDrafts, pruneDrafts, workerLine } from "../model/managed";
 import type { ViewActions, ViewHost } from "./views";
 
 const STEP_ROWS = 7;
@@ -75,6 +76,7 @@ function tabButtons(actions: ViewActions, sessions: Session[], focusId: string |
       },
       h("span", { class: `sglyph ${s.status}`, style: `--c:${colorForProject(s.project)}`, text: statusGlyph(s.status) }),
       h("span", { class: "tab-name", text: s.project }),
+      s.managed ? managedMark(11) : null,
     ),
   );
 }
@@ -103,6 +105,7 @@ function header(s: Session): Node[] {
       { class: "x-title" },
       statusDot(s),
       sessionName(s, "x-name"),
+      isManaged(s) ? managedMark(13) : null,
       s.model ? h("span", { class: "x-model" }, claudeMark(), modelName(s.model)) : null,
     ),
     h("div", { class: "x-cwd", text: s.cwd, title: s.cwd }),
@@ -385,6 +388,80 @@ export function buildSessionView(actions: ViewActions): ViewHost {
     return Math.max(bottom(stepsEl), bottom(sideEl));
   };
   const accountEl = h("div", { class: "blk x-account" });
+
+  // Prompt line and Stop for a session Buddy started: the user's own actions, no confirmation card.
+  const drafts = newDrafts();
+  let workerFor = "";
+  let sending = false;
+  let stopping = false;
+  const wInput = h("input", { class: "x-w-input", type: "text", spellcheck: "false", placeholder: "Send a prompt to this session" });
+  const wSend = h("button", { class: "x-w-send", title: "Send (Enter)" }, svg(ICONS.arrowUp, 13, { stroke: 2.2 }));
+  const wStop = h("button", { class: "x-w-stop", title: "Stop this session" }, svg(ICONS.stop, 11), h("span", { text: "Stop" }));
+  const wErr = h("div", { class: "x-w-err" });
+  const workerEl = h("div", { class: "x-worker" }, h("div", { class: "x-w-line" }, wInput, wSend, wStop), wErr);
+  workerEl.style.display = "none";
+  const paintWorker = (s: Session) => {
+    const line = workerLine(s);
+    workerEl.style.display = line.visible ? "" : "none";
+    wInput.disabled = line.disabled || sending;
+    if (wInput.placeholder !== line.placeholder) wInput.placeholder = line.placeholder;
+    wSend.disabled = line.disabled || sending || cleanPrompt(wInput.value) === null;
+    wStop.disabled = !line.canStop || stopping;
+    const err = drafts.error.get(s.id) ?? "";
+    if (wErr.textContent !== err) wErr.textContent = err;
+    wErr.style.display = err ? "" : "none";
+  };
+  const sendPrompt = () => {
+    const s = State.focus;
+    const text = cleanPrompt(wInput.value);
+    if (!s || !text || sending || workerLine(s).disabled) return;
+    sending = true;
+    drafts.error.delete(s.id);
+    paintWorker(s);
+    void actions.worker.send(s.id, text).then((error) => {
+      sending = false;
+      if (error) drafts.error.set(s.id, error);
+      else {
+        drafts.text.delete(s.id);
+        if (workerFor === s.id) wInput.value = "";
+      }
+      actions.redraw();
+    });
+  };
+  wSend.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sendPrompt();
+  });
+  wStop.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const s = State.focus;
+    if (!s || stopping) return;
+    stopping = true;
+    drafts.error.delete(s.id);
+    paintWorker(s);
+    void actions.worker.stop(s.id).then((error) => {
+      stopping = false;
+      if (error) drafts.error.set(s.id, error);
+      actions.redraw();
+    });
+  });
+  wInput.addEventListener("mousedown", () => {
+    actions.wantKeyboard(true);
+    window.setTimeout(() => wInput.focus(), 120);
+  });
+  wInput.addEventListener("input", () => {
+    if (workerFor) drafts.text.set(workerFor, wInput.value);
+    if (workerFor && drafts.error.delete(workerFor)) actions.redraw();
+    const s = State.focus;
+    if (s) paintWorker(s);
+  });
+  wInput.addEventListener("blur", () => actions.wantKeyboard(false));
+  wInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendPrompt();
+    }
+  });
   const sessionEl = h(
     "div",
     { class: "blk x-session" },
@@ -395,6 +472,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
     h("div", { class: "x-divider" }),
     bodyEl,
     stepFull,
+    workerEl,
   );
   const el = h(
     "div",
@@ -433,7 +511,8 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       if (!step && State.manualH == null && bodyEl.clientHeight > 0) bodyNaturalH = bodyEl.clientHeight;
       // The free space under the rows (few steps, few agents: a lot) goes to the panel first.
       const slack = step && bodyNaturalH ? Math.max(0, bodyNaturalH - bodyContentH() - 4) : 0;
-      return VIEW_HEIGHT_SESSION + extra(answerFull) + Math.max(0, step - slack);
+      const worker = workerEl.style.display === "none" ? 0 : workerEl.offsetHeight + parseFloat(getComputedStyle(workerEl).marginTop);
+      return VIEW_HEIGHT_SESSION + extra(answerFull) + Math.max(0, step - slack) + worker;
     },
     needs() {
       const island = el.closest<HTMLElement>("#island");
@@ -459,7 +538,7 @@ export function buildSessionView(actions: ViewActions): ViewHost {
       const now = Date.now();
       const minute = Math.floor(now / 60_000);
       const recent = recentCount(State.allSessions);
-      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}#${State.chat.unread}`, () =>
+      keyed(tabsEl, `${all.map((x) => `${x.id}:${x.status}:${x.project}:${x.live}:${x.managed}`).join("|")}#${s?.id ?? ""}#${recent}:${State.showRecent}#${State.chat.unread}`, () =>
         tabs(actions, all, s?.id ?? null, recent),
       );
       keyed(accountEl, JSON.stringify([State.snapshot.usage, minute]), () => accountBlock(State.snapshot.usage, now));
@@ -475,9 +554,16 @@ export function buildSessionView(actions: ViewActions): ViewHost {
         keyed(stepsEl, "none", () => []);
         keyed(sideEl, "none", () => []);
         stepFull.style.display = "none";
+        workerEl.style.display = "none";
         return;
       }
-      keyed(headEl, JSON.stringify([s.id, s.status, s.project, s.branch, s.cwd, s.stats, s.model]), () => header(s));
+      pruneDrafts(drafts, State.allSessions);
+      if (workerFor !== s.id) {
+        workerFor = s.id;
+        wInput.value = drafts.text.get(s.id) ?? "";
+      }
+      paintWorker(s);
+      keyed(headEl, JSON.stringify([s.id, s.status, s.project, s.branch, s.cwd, s.stats, s.model, s.managed]), () => header(s));
       const prompt = s.lastPrompt ? firstLine(s.lastPrompt, 160) : "";
       keyed(promptEl, prompt, () => (prompt ? [h("span", { class: "lbl", text: "Prompt " }), document.createTextNode(prompt)] : []));
       promptEl.title = s.lastPrompt ?? "";
@@ -508,6 +594,12 @@ export function buildSessionView(actions: ViewActions): ViewHost {
         openStep?.detail ? stepPanel(actions, openStep, openStep.detail) : [],
       );
       keyed(sideEl, JSON.stringify([s.id, s.agents, s.background, minute, openFinished.has(s.id)]), () => sideCol(actions, s, now));
+    },
+    key(e) {
+      if (e.key !== "Escape" || document.activeElement !== wInput) return false;
+      e.preventDefault();
+      wInput.blur();
+      return true;
     },
   };
 }

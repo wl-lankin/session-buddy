@@ -6,7 +6,7 @@ const sess = (id: string, plan: string | null, pending: Interaction[] = []): Ses
   id, project: id, cwd: "", branch: null, termProgram: null, model: null, status: "thinking", statusSince: 0,
   lastPrompt: null, lastMessage: null, steps: [], agents: [], background: [],
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: null, contextTokens: null, contextSize: null, costUsd: null },
-  pending, startedAt: 0, lastEventAt: 0, pid: null, live: true, plan,
+  pending, startedAt: 0, lastEventAt: 0, pid: null, live: true, plan, managed: false,
 });
 
 const approval: Interaction = { kind: "approval", requestId: "r1", tool: "Bash", target: "ls", agentId: null, deadline: 0 };

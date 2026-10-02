@@ -22,8 +22,16 @@ export function modelBadge(provider: ChatProvider, model: string): ModelBadge {
 }
 
 /** What the Off card says really runs. */
-export function offLines(o: { provider: ChatProvider; model: string; webSearch: boolean; idleMinutes: number }): string[] {
+export function offLines(o: { provider: ChatProvider; model: string; webSearch: boolean; idleMinutes: number; mode?: "web" | "control" }): string[] {
   const stop = o.idleMinutes > 0 ? `, and stops after ${o.idleMinutes} idle minutes` : "";
+  if (o.mode === "control") {
+    const where = o.provider === "ollama" ? `Runs ${modelLabel("ollama", o.model)} on this machine through Ollama` : `Runs a background Claude Code with ${modelLabel("claude", o.model)}`;
+    return [
+      `${where}, only while you use it${stop}`,
+      "Can look at your sessions, and start, steer or stop background sessions in the folders you allow",
+      "Nothing starts without your OK in the island. No web search, no files, no shell for the chat itself",
+    ];
+  }
   if (o.provider === "ollama") {
     return [
       `Runs ${modelLabel("ollama", o.model)} on this machine through Ollama, only while you use it${stop}`,
@@ -36,4 +44,10 @@ export function offLines(o: { provider: ChatProvider; model: string; webSearch: 
     o.webSearch ? "Web search only: no files, no shell, nothing written to disk" : "No files, no shell, nothing written to disk",
     "Your messages go to Anthropic with your own Claude login",
   ];
+}
+
+/** The Off card's opening line for the real mode. */
+export function offLead(o: { webSearch: boolean; mode?: "web" | "control" }): string {
+  if (o.mode === "control") return "Ask about your sessions, or have Buddy start one for you, without leaving the island.";
+  return o.webSearch ? "Quick questions, a look at one of your sessions, or a web search, without leaving the island." : "Quick questions or a look at one of your sessions, without leaving the island.";
 }

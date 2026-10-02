@@ -17,6 +17,7 @@ tauri = { version = "2.5", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "fs"] }
@@ -50,3 +51,7 @@ libc = "0.2"
 # The versions tauri already uses: only to find the notch and lift the island over the menu bar.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

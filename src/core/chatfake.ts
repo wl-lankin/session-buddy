@@ -46,7 +46,59 @@ function answerFor(text: string, searched: boolean): string {
   return "Hi! I run in the background and I can look at your sessions or search the web.\n\nTry attaching a session with **+ Session** and ask what it is doing.";
 }
 
+/** Streams `full` in bursts from `at` ms on, then ends the turn. */
+function streamAnswer(id: string, full: string, at: number) {
+  streamAnswer(id, full, at);
+}
+
+/** A control-mode start waiting for the confirmation card (answered through the `answer` command). */
+let pendingStart: { id: string; callId: string; project: string } | null = null;
+
+const START = /start (?:a |an |another )?(?:new )?session in ([\w.-]+)/i;
+
+function runControl(text: string) {
+  const id = `t${++turns}`;
+  const tool = (callId: string, name: string, label: string, state: "running" | "done" | "denied") =>
+    emit({ type: "tool", id, callId, tool: `mcp__buddy__${name}`, label, state });
+  setStatus("busy");
+  emit({ type: "turn", id });
+  later(350, () => emit({ type: "thinking", id }));
+  const start = START.exec(text);
+  if (start) {
+    const project = start[1];
+    later(900, () => tool(`${id}a`, "list_projects", "Looking at your projects", "running"));
+    later(1500, () => tool(`${id}a`, "list_projects", "Looking at your projects", "done"));
+    later(1900, () => {
+      tool(`${id}b`, "start_session", `Starting a session in ${project}`, "running");
+      pendingStart = { id, callId: `${id}b`, project };
+      window.dispatchEvent(new CustomEvent("sb-fake-start", { detail: { project } }));
+    });
+    return;
+  }
+  if (/project|folder/i.test(text)) {
+    later(800, () => tool(`${id}c`, "list_projects", "Looking at your projects", "running"));
+    later(1300, () => tool(`${id}c`, "list_projects", "Looking at your projects", "done"));
+    streamAnswer(id, "I can start sessions in these folders:\n\n- **nexa-web**\n- **client-sites/nexa**\n- **session-buddy**\n\nSay *start a session in nexa-web* and I will ask you to confirm.", 1500);
+    return;
+  }
+  later(800, () => tool(`${id}c`, "list_sessions", "Looking at your sessions", "running"));
+  later(1400, () => tool(`${id}c`, "list_sessions", "Looking at your sessions", "done"));
+  streamAnswer(id, "Three sessions are running:\n\n- **pushdocs** is editing the DATEV client\n- **bankconnect** waits for a permission (`php artisan migrate`)\n- **fetchdocs** asks which driver the import should use\n\nNothing else needs you.", 1600);
+}
+
+function finishStart(allow: boolean) {
+  const p = pendingStart;
+  if (!p) return;
+  pendingStart = null;
+  emit({ type: "tool", id: p.id, callId: p.callId, tool: "mcp__buddy__start_session", label: allow ? `Started a session in ${p.project}` : `Starting a session in ${p.project}`, state: allow ? "done" : "denied" });
+  streamAnswer(p.id, allow ? `Started. **${p.project}** is running in the background, you can follow it in the tabs and send it more prompts there.` : "Okay, I did not start anything.", 500);
+}
+
 function run(text: string) {
+  if (State.settings.chatMode === "control") {
+    runControl(text);
+    return;
+  }
   const id = `t${++turns}`;
   const searched = State.settings.chatProvider !== "ollama" && SEARCH.test(text.split("</attached-session>").pop() ?? text);
   const full = answerFor(text, searched);
@@ -56,27 +108,14 @@ function run(text: string) {
   later(at, () => emit({ type: "thinking", id }));
   if (searched) {
     at += 700;
-    later(at, () => emit({ type: "tool", id, callId: `c${turns}`, tool: "WebSearch", label: "claude code release notes", state: "running" }));
+    later(at, () => emit({ type: "tool", id, callId: `${id}c`, tool: "WebSearch", label: "claude code release notes", state: "running" }));
     at += 2200;
-    later(at, () => emit({ type: "tool", id, callId: `c${turns}`, tool: "WebSearch", label: "claude code release notes", state: "done" }));
+    later(at, () => emit({ type: "tool", id, callId: `${id}c`, tool: "WebSearch", label: "claude code release notes", state: "done" }));
     at += 200;
   } else {
     at += 500;
   }
-  // Bursty on purpose: the view has to smooth it out.
-  let i = 0;
-  const step = () => {
-    if (i >= full.length) {
-      emit({ type: "done", id, text: full, durationMs: at, costUsd: 0.0012 });
-      setStatus("ready");
-      return;
-    }
-    const n = 2 + Math.floor(Math.random() * 14);
-    emit({ type: "delta", id, text: full.slice(i, i + n) });
-    i += n;
-    later(45 + Math.random() * 60, step);
-  };
-  later(at, step);
+  streamAnswer(id, full, at);
 }
 
 function ensureRunning(then: () => void) {
@@ -89,6 +128,10 @@ function ensureRunning(then: () => void) {
   } else then();
 }
 
+/** What the fake folder dialog answers on its turns; the last one is "cancelled". */
+const PICKS: (string | null)[] = ["/Users/alex/Projects/nexa-web-v2", "/Users/alex/Code/experiments/nexa", null];
+let picked = 0;
+
 const FAKE_MODELS = ["qwen2.5:7b", "gemma2:9b", "mistral-small:latest"];
 
 /** ?ollama=down or ?ollama=empty in the page URL picks the unreachable or the empty answer. */
@@ -100,7 +143,7 @@ function fakeModels(url: unknown): ChatModels {
   return { reachable: true, models: FAKE_MODELS };
 }
 
-const runKey = (c: typeof DEFAULT_SETTINGS) => `${c.chatProvider}|${c.chatProvider === "ollama" ? c.chatOllamaModel : c.chatModel}|${c.chatOllamaUrl}`;
+const runKey = (c: typeof DEFAULT_SETTINGS) => `${c.chatProvider}|${c.chatProvider === "ollama" ? c.chatOllamaModel : c.chatModel}|${c.chatOllamaUrl}|${c.chatMode}`;
 let lastRun = runKey(DEFAULT_SETTINGS);
 
 /** The real backend stops the process when provider, model or address change. */
@@ -112,7 +155,8 @@ function settingsSaved() {
   lastRun = key;
   cancel();
   state = "off";
-  emit({ type: "status", state: "off", provider, model, webSearch: provider !== "ollama" });
+  pendingStart = null;
+  emit({ type: "status", state: "off", provider, model, webSearch: provider !== "ollama" && State.settings.chatMode === "web", mode: State.settings.chatMode, controlReady: State.settings.chatProjectRoots.length > 0 });
 }
 
 export function fakeChat(cmd: string, args?: Record<string, unknown>): { value: unknown } | null {
@@ -122,7 +166,8 @@ export function fakeChat(cmd: string, args?: Record<string, unknown>): { value: 
       const { chatProvider: provider, chatModel, chatOllamaModel } = State.settings;
       const local = provider === "ollama";
       const status: ChatStatus = {
-        enabled, state: enabled ? state : "off", claudeFound: true, provider, model: local ? chatOllamaModel : chatModel, webSearch: !local,
+        enabled, state: enabled ? state : "off", claudeFound: true, provider, model: local ? chatOllamaModel : chatModel,
+        webSearch: !local && State.settings.chatMode === "web", mode: State.settings.chatMode, controlReady: State.settings.chatProjectRoots.length > 0,
       };
       return { value: status };
     }
@@ -141,7 +186,19 @@ export function fakeChat(cmd: string, args?: Record<string, unknown>): { value: 
       cancel();
       setStatus("ready");
       return { value: undefined };
+    case "pick_folder":
+      return { value: PICKS[picked++ % PICKS.length] };
+    case "worker_send":
+      return { value: /fail/i.test(String(args?.text ?? "")) ? "That session is busy with another prompt." : null };
+    case "worker_stop":
+      return { value: null };
+    case "answer": {
+      const a = args?.answer as { allow?: boolean } | undefined;
+      if (typeof a?.allow === "boolean") finishStart(a.allow);
+      return { value: undefined };
+    }
     case "chat_reset":
+      pendingStart = null;
       cancel();
       setStatus("off");
       return { value: undefined };

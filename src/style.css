@@ -495,6 +495,18 @@ body {
 .x-cwd { font: 400 11px var(--mono); color: var(--dim-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 15px; line-height: 15px; }
 .x-meta { height: 16px; display: flex; align-items: center; gap: 14px; font: 500 11.5px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; }
 .x-tokens { color: var(--dim-4); }
+.managed-mark { flex: 0 0 auto; display: inline-grid; place-items: center; color: var(--cyan); opacity: 0.85; }
+.tab .managed-mark { opacity: 0.7; }
+.x-worker { flex: 0 0 auto; margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.x-w-line { display: flex; align-items: center; gap: 6px; height: 26px; }
+.x-w-input { flex: 1 1 auto; min-width: 0; height: 26px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 9px; background: var(--card-flat); color: var(--ink); font: 400 12px var(--font); outline: none; user-select: text; }
+.x-w-input:focus { border-color: var(--cyan); }
+.x-w-input:disabled { color: var(--dim-3); }
+.x-w-input::placeholder { color: var(--dim-3); }
+.x-w-send { flex: 0 0 auto; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: var(--ink); color: #0b0c0e; cursor: pointer; }
+.x-w-stop { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 11px 0 9px; border: 0; border-radius: 999px; background: rgba(244, 80, 94, 0.16); color: var(--red-text); font: 500 11.5px var(--font); cursor: pointer; }
+.x-w-send:disabled, .x-w-stop:disabled { opacity: 0.35; cursor: default; }
+.x-w-err { padding-left: 2px; font: 500 11px/14px var(--font); color: var(--red-text); overflow-wrap: anywhere; }
 .lbl { color: var(--dim-3); }
 .x-prompt { flex: 0 0 auto; margin-top: 3px; height: 16px; line-height: 16px; font: 400 11.5px var(--font); color: var(--dim-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Last answer: one dim line; a click unfolds the whole message below it. */
@@ -764,6 +776,25 @@ body {
 .i-head, .i-notice { flex: 0 0 auto; }
 .i-reply { flex: 0 0 auto; margin-top: 8px; overflow: hidden; resize: none; display: block; }
 .i-reply.overflowing { overflow-y: auto; }
+/* Action card: the chat asks to act (start a session). */
+.i-buddy { flex: 0 0 auto; display: inline-grid; place-items: center; color: var(--cyan); }
+.i-rows { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
+.i-row, .i-field { display: grid; grid-template-columns: 60px minmax(0, 1fr); align-items: center; column-gap: 8px; font: 500 12px var(--font); }
+.i-row { min-height: 18px; }
+.i-fl { color: var(--dim-3); }
+.i-rv { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.i-prompt { flex: 1 1 auto; min-height: 54px; padding: 7px 10px; border-radius: 9px; background: var(--card-flat); border: 1px solid rgba(255, 255, 255, 0.07); font: 400 12.5px/1.45 var(--font); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.i-field { flex: 0 0 auto; }
+.i-fv { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.i-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--mono); color: var(--ink-2); }
+.i-path.plain { font: 500 12px var(--font); }
+.i-fv .btn { flex: 0 0 auto; padding: 4px 11px; font-size: 11.5px; }
+.i-fopts { grid-column: 2; display: flex; flex-direction: column; gap: 2px; max-height: 56px; margin-top: 4px; padding-right: 4px; }
+.i-fopt { display: block; flex: 0 0 auto; width: 100%; padding: 2px 8px; border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 7px; background: transparent; color: var(--dim); font: 400 11px/16px var(--mono); text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.i-fopt:hover { border-color: var(--cyan); color: var(--ink-2); }
+.i-fopt:disabled { opacity: 0.4; cursor: default; }
+.i-select { justify-self: start; max-width: 100%; padding: 3px 8px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; background: var(--card-flat); color: var(--ink); font: 500 12px var(--font); outline: none; }
+.i-select:focus { border-color: var(--cyan); }
 .i-countdown { font: 500 11px var(--font); color: var(--dim-4); }
 .i-notice { font: 500 11.5px var(--font); color: var(--red-text); }
 .grow { flex: 1 1 auto; }
@@ -851,6 +882,7 @@ body {
 
 /* Enlarged: the text areas take the extra room instead of leaving it empty. */
 .big .i-target { max-height: none; }
+.big .i-fopts { max-height: 120px; }
 .big .f-message, .big .f-list { max-height: none; flex: 1 1 auto; }
 .big .x-answer-full { max-height: none; }
 .big .x-step-full { max-height: none; }
@@ -867,6 +899,14 @@ body {
 .c-model { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: 0 100 auto; color: var(--dim-2); }
 .c-model::before { content: ""; width: 3px; height: 3px; border-radius: 50%; background: var(--dim-5); flex: 0 0 auto; }
 .c-model-name { overflow: hidden; text-overflow: ellipsis; }
+.c-modesw { display: inline-flex; flex: 0 0 auto; margin-left: 4px; padding: 1px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); }
+.c-modesw.locked { opacity: 0.55; }
+.c-mode { padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--dim-2); font: 600 10.5px/16px var(--font); cursor: pointer; transition: background 0.15s ease-out, color 0.15s ease-out; }
+.c-mode:hover { color: var(--ink); }
+.c-mode.on { background: rgba(255, 255, 255, 0.14); color: var(--ink); }
+.c-mode:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.c-modesw.locked .c-mode { cursor: default; }
+.c-modesw.locked .c-mode:hover:not(.on) { color: var(--dim-2); }
 .c-pick { display: inline-flex; align-items: center; gap: 5px; min-width: 0; margin-left: -2px; padding: 1px 6px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: background 0.15s ease-out, color 0.15s ease-out; }
 .c-pick:hover { background: rgba(255, 255, 255, 0.07); color: var(--ink); }
 .c-pick:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
@@ -941,6 +981,10 @@ body {
 .c-pill.done { background: rgba(255, 255, 255, 0.06); color: var(--dim); }
 .c-pill.done svg { color: var(--green-2); }
 .c-pill.error { background: rgba(244, 80, 94, 0.13); color: var(--red-text); }
+.c-pill.denied { background: rgba(245, 165, 36, 0.12); color: var(--amber); }
+.c-pill.denied .c-pill-text { text-decoration: line-through; text-decoration-color: rgba(245, 165, 36, 0.55); }
+.c-ctl { max-width: 440px; }
+.c-ctl .btn { margin-top: 4px; padding: 8px 18px; font-size: 13px; }
 .c-pill-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .c-spin { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; border: 1.6px solid rgba(174, 179, 255, 0.3); border-top-color: #aeb3ff; animation: c-spin 0.8s linear infinite; }
 @keyframes c-spin { to { transform: rotate(360deg); } }

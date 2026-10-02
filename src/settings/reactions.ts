@@ -6,6 +6,7 @@ export type SettingsEvent =
   | { kind: "sound"; on: boolean }
   | { kind: "chat"; on: boolean }
   | { kind: "ollama"; ok: boolean }
+  | { kind: "folder"; added: boolean }
   | { kind: "install"; install: boolean; ok: boolean };
 
 export interface Reaction {
@@ -21,6 +22,8 @@ export function reactionFor(ev: SettingsEvent): Reaction | null {
       return ev.on ? { emote: "yawn" } : null;
     case "chat":
       return { emote: ev.on ? "wink" : "yawn" };
+    case "folder":
+      return ev.added ? { emote: "happy" } : null;
     case "ollama":
       return ev.ok ? { emote: "happy" } : { state: "error", holdMs: 2600 };
     case "install":

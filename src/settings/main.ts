@@ -9,14 +9,16 @@ import { Sound } from "../core/sound";
 import { ICONS } from "../views/icons";
 import { h, svg } from "../views/dom";
 import { headerBuddy, type HeaderBuddy } from "./buddy";
-import { DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, secondsLabel } from "./helpers";
+import { addRoot, DEFAULT_OLLAMA_URL, normalizeNumber, normalizeOllamaUrl, ollamaTestText, removeRoot, rootParts, secondsLabel, SESSION_HOSTS } from "./helpers";
 import { buddyMark } from "./mark";
 import type { SettingsEvent } from "./reactions";
 
 // ?demo=1 in a plain browser: a fake boot result for the README screenshots.
 const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "1";
 // &ollama=down|empty picks the fake Ollama server's answer for the Test button.
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true }, version: "1.0.5" };
+// &roots=2 lists two project folders in the Control block.
+const DEMO_ROOTS = new URLSearchParams(location.search).get("roots") === "2" ? ["/Users/alex/Projects", "/Users/alex/Work/client-sites"] : [];
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true, chatProjectRoots: DEMO_ROOTS }, version: "1.0.6" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,
@@ -156,6 +158,68 @@ function installSection(): HTMLElement {
   return box;
 }
 
+/** The "Control" part of the Chat card: where Buddy may start sessions, how many at once, where they run. */
+function controlBlock(): HTMLElement[] {
+  const list = h("div", { class: "roots" });
+  const paint = () => {
+    const roots = settings.chatProjectRoots;
+    list.replaceChildren(
+      ...(roots.length
+        ? roots.map((path) => {
+            const { name, dir } = rootParts(path);
+            return h(
+              "div",
+              { class: "root", title: path },
+              h("span", { class: "root-name", text: name }),
+              h("span", { class: "root-dir", text: dir }),
+              h("button", {
+                class: "root-x",
+                type: "button",
+                title: `Remove ${name}`,
+                "aria-label": `Remove ${name}`,
+                text: "\u00D7",
+                onclick: () => {
+                  settings.chatProjectRoots = removeRoot(settings.chatProjectRoots, path);
+                  save();
+                  paint();
+                },
+              }),
+            );
+          })
+        : [h("div", { class: "root none", text: "No folders yet: Buddy cannot start sessions" })]),
+    );
+  };
+  paint();
+  const add = h("button", { type: "button", class: "primary", text: "Add folder..." });
+  add.addEventListener("click", () => {
+    add.disabled = true;
+    const last = settings.chatProjectRoots.at(-1);
+    void Bridge.pickFolder(last ? rootParts(last).dir || last : undefined).then((picked) => {
+      add.disabled = false;
+      const next = addRoot(settings.chatProjectRoots, picked);
+      if (next === settings.chatProjectRoots) return;
+      settings.chatProjectRoots = next;
+      save();
+      paint();
+      tell({ kind: "folder", added: true });
+    });
+  });
+  const host = h("select", {}, ...SESSION_HOSTS.map((o) => h("option", { value: o.id, text: o.label })));
+  host.value = SESSION_HOSTS.some((o) => o.id === settings.chatSessionHost) ? settings.chatSessionHost : SESSION_HOSTS[0].id;
+  host.addEventListener("change", () => {
+    settings.chatSessionHost = host.value;
+    save();
+  });
+  return [
+    h("h3", { class: "sub-h", text: "Control" }),
+    h("p", { class: "note tight", text: "Buddy may suggest sessions in these folders. You confirm every start in the island, and you can pick another folder there." }),
+    list,
+    h("div", { class: "actions" }, add),
+    row("Parallel sessions", numberInput(() => settings.chatMaxWorkers, (v) => (settings.chatMaxWorkers = v), 1, 6), "background sessions Buddy runs at once"),
+    row("Runs in", host, "where a started session runs"),
+  ];
+}
+
 function chatSection(): HTMLElement {
   const cliState = h("span", { class: "v pill off", text: "checking..." });
   const cli = h("div", { class: "kv" }, h("span", { class: "k", text: "Claude CLI" }), cliState);
@@ -202,13 +266,14 @@ function chatSection(): HTMLElement {
     "Chat",
     ICONS.bubble,
     h("p", { class: "note", text: "A chat in the island, answered by a background Claude Code or by a model running locally in Ollama. It runs only while you use it, can read nothing on your disk and writes nothing to it." }),
-    h("p", { class: "note tight", text: "Choose the model in the chat header." }),
+    h("p", { class: "note tight", text: "Choose the model, and Web or Control mode, in the chat header." }),
     row("Chat", toggle(() => settings.chatEnabled, (v) => { settings.chatEnabled = v; void check(); tell({ kind: "chat", on: v }); }), "adds a bubble to the island, off by default"),
     row("Stop after idle", numberInput(() => settings.chatIdleMinutes, (v) => (settings.chatIdleMinutes = v), 0, 240, 1, true, (v) => (v === 0 ? "Never" : "minutes")), "idle time before the background process stops"),
     cli,
     row("Claude CLI path", path, "optional, only to override the automatic detection"),
     row("Ollama server", h("span", { class: "field" }, url, test), "address of a local or network Ollama"),
     resultRow,
+    ...controlBlock(),
   );
 }
 
@@ -287,7 +352,7 @@ async function main() {
   Sound.setEnabled(settings.soundEnabled);
   // The model is picked in the island: take it over so a later save here does not undo it.
   void onEvent<Settings>("settings-changed", (s) => {
-    settings = { ...settings, chatProvider: s.chatProvider, chatModel: s.chatModel, chatOllamaModel: s.chatOllamaModel };
+    settings = { ...settings, chatProvider: s.chatProvider, chatModel: s.chatModel, chatOllamaModel: s.chatOllamaModel, chatMode: s.chatMode };
   });
   buddy = headerBuddy(settings.soundEnabled);
 

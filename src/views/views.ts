@@ -26,6 +26,12 @@ export interface ChatActions {
   typing(on: boolean): void;
 }
 
+export interface WorkerActions {
+  /** Resolve to an error message, or null on success. */
+  send(sessionId: string, text: string): Promise<string | null>;
+  stop(sessionId: string): Promise<string | null>;
+}
+
 export interface ViewActions {
   focus(id: string): void;
   /** Focus a session and show its session view. */
@@ -55,6 +61,9 @@ export interface ViewActions {
   /** Leave the chat view for the sessions. */
   closeChat(): void;
   chat: ChatActions;
+  /** The native folder dialog, opened at `startDir`; null when cancelled. */
+  pickFolder(startDir?: string): Promise<string | null>;
+  worker: WorkerActions;
 }
 
 export interface ViewHost {

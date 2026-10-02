@@ -1,7 +1,7 @@
 //! Every Claude Code session, built from hook and status-line events.
 //! Pure state: no I/O, no clock. Callers pass `now` in epoch milliseconds.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -147,6 +147,8 @@ pub struct Session {
     pub prompt_at: Option<i64>,
     /// The plan Claude Code is asking to approve (ExitPlanMode). Answered only in the terminal.
     pub plan: Option<String>,
+    /// A background session started by Session Buddy itself: the island may send it prompts and stop it.
+    pub managed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -186,6 +188,8 @@ pub struct Store {
     pub remove_after_ms: i64,
     /// Latest `rate_limits` object seen in a status-line payload, with when it arrived.
     pub rate_limits: Option<(Value, i64)>,
+    /// Ids of the sessions Session Buddy started; a hook may arrive before or after the id is known.
+    managed: HashSet<String>,
 }
 
 impl Default for Store {
@@ -195,6 +199,7 @@ impl Default for Store {
             stale_after_ms: DEFAULT_STALE_AFTER_MS,
             remove_after_ms: DEFAULT_REMOVE_AFTER_MS,
             rate_limits: None,
+            managed: HashSet::new(),
         }
     }
 }
@@ -235,6 +240,7 @@ impl Session {
             finish_deferred: false,
             prompt_at: None,
             plan: None,
+            managed: false,
         }
     }
 
@@ -349,6 +355,14 @@ impl Store {
         self.sessions.get(id)
     }
 
+    /// Flags a session as started by Session Buddy, now or when its first event arrives.
+    pub fn mark_managed(&mut self, id: &str) {
+        self.managed.insert(id.to_string());
+        if let Some(sess) = self.sessions.get_mut(id) {
+            sess.managed = true;
+        }
+    }
+
     pub fn snapshot(&self) -> Vec<Session> {
         let mut list: Vec<Session> = self.sessions.values().cloned().collect();
         list.sort_by(|a, b| a.started_at.cmp(&b.started_at).then_with(|| a.id.cmp(&b.id)));
@@ -374,7 +388,9 @@ impl Store {
         if let Some(pid) = pid {
             self.release_pid(id, pid);
         }
+        let managed = self.managed.contains(id);
         let sess = self.sessions.entry(id.to_string()).or_insert_with(|| Session::new(id, now));
+        sess.managed |= managed;
         sess.live = true;
         if pid.is_some() {
             sess.pid = pid;
@@ -803,6 +819,23 @@ mod tests {
 
     fn sess(store: &Store) -> &Session {
         store.get("s1").expect("session s1")
+    }
+
+    #[test]
+    fn a_managed_session_is_flagged_whichever_comes_first() {
+        let mut st = Store::default();
+        st.mark_managed("s1");
+        st.apply_hook(&ev("SessionStart", json!({})), T0);
+        assert!(sess(&st).managed);
+        assert!(serde_json::to_value(sess(&st)).unwrap()["managed"].as_bool().unwrap());
+
+        let mut st = Store::default();
+        st.apply_hook(&ev("SessionStart", json!({})), T0);
+        assert!(!sess(&st).managed);
+        st.mark_managed("s1");
+        assert!(sess(&st).managed);
+        st.apply_hook(&ev("UserPromptSubmit", json!({"prompt": "go"})), T0 + 1);
+        assert!(sess(&st).managed);
     }
 
     #[test]

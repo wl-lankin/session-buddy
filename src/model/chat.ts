@@ -14,16 +14,21 @@ export type ChatEvent =
   | { type: "turn"; id: string }
   | { type: "thinking"; id: string }
   | { type: "delta"; id: string; text: string }
-  | { type: "tool"; id: string; callId: string; tool: string; label: string; state: "running" | "done" | "error" }
+  | { type: "tool"; id: string; callId: string; tool: string; label: string; state: ToolState }
   | { type: "done"; id: string; text: string; durationMs: number; costUsd?: number }
   | { type: "error"; id?: string; message: string };
 
-/** The model the backend runs (effective name) and whether it can search the web. */
-export interface ModelInfo { provider: ChatProvider; model: string; webSearch: boolean }
+export type ChatMode = "web" | "control";
+
+/** The model the backend runs (effective name), whether it can search the web, and the mode (web search or session control). */
+export interface ModelInfo { provider: ChatProvider; model: string; webSearch: boolean; mode: ChatMode; controlReady: boolean }
 
 export interface ChatStatus extends ModelInfo { enabled: boolean; state: ChatState; claudeFound: boolean; detail?: string }
 
-export interface ToolPill { callId: string; tool: string; label: string; state: "running" | "done" | "error" }
+/** "denied": the user said no on the confirmation card. */
+export type ToolState = "running" | "done" | "error" | "denied";
+
+export interface ToolPill { callId: string; tool: string; label: string; state: ToolState }
 
 /** What the user's bubble shows instead of the attached block. */
 export interface ContextChip { kind: "session" | "overview"; label: string }
@@ -57,7 +62,7 @@ export interface ChatModel extends ModelInfo {
 }
 
 export function initialChat(): ChatModel {
-  return { items: [], provider: "claude", model: "haiku", webSearch: true, enabled: false, state: "off", detail: null, claudeFound: null, turnId: null, awaiting: false, unread: false, stopPending: false, seq: 0 };
+  return { items: [], provider: "claude", model: "haiku", webSearch: true, mode: "web", controlReady: false, enabled: false, state: "off", detail: null, claudeFound: null, turnId: null, awaiting: false, unread: false, stopPending: false, seq: 0 };
 }
 
 export type ChatAction =
@@ -84,7 +89,12 @@ export function activeAnswer(m: ChatModel): Assistant | null {
   return null;
 }
 
-export const isSearching = (m: ChatModel): boolean => activeAnswer(m)?.tools.some((t) => t.state === "running") ?? false;
+/** The control tools (`mcp__buddy__*`) act on sessions; everything else is a web tool. */
+export const isControlTool = (tool: string): boolean => tool.startsWith("mcp__buddy__");
+
+const runningWeb = (tools: ToolPill[]): number => tools.filter((t) => t.state === "running" && !isControlTool(t.tool)).length;
+
+export const isSearching = (m: ChatModel): boolean => runningWeb(activeAnswer(m)?.tools ?? []) > 0;
 
 const lastIsDivider = (m: ChatModel): boolean => m.items[m.items.length - 1]?.kind === "divider";
 
@@ -123,8 +133,9 @@ function abandonTurn(m: ChatModel, message: string): ChatModel {
 function withInfo(m: ChatModel, info: Partial<ModelInfo>): { m: ChatModel; changed: boolean } {
   const provider = info.provider ?? m.provider;
   const model = info.model ?? m.model;
-  const changed = (provider !== m.provider || model !== m.model) && m.claudeFound !== null;
-  return { m: { ...m, provider, model, webSearch: info.webSearch ?? m.webSearch }, changed };
+  const mode = info.mode ?? m.mode;
+  const changed = (provider !== m.provider || model !== m.model || mode !== m.mode) && m.claudeFound !== null;
+  return { m: { ...m, provider, model, mode, webSearch: info.webSearch ?? m.webSearch, controlReady: info.controlReady ?? m.controlReady }, changed };
 }
 
 function setState(m: ChatModel, state: ChatState, detail: string | null, at: number, modelChanged = false): ChatModel {
@@ -276,9 +287,27 @@ const TOOL_TEXT: Record<string, [running: string, done: string, failed: string]>
   WebFetch: ["Reading", "Read", "Could not read"],
 };
 
+/** What a control tool says when the backend sent no label. */
+const CONTROL_FALLBACK: Record<string, string> = {
+  list_sessions: "Looking at your sessions",
+  get_session: "Looking at a session",
+  list_projects: "Looking at your projects",
+  start_session: "Starting a session",
+  send_prompt: "Sending a prompt",
+  stop_session: "Stopping a session",
+};
+
 export function toolText(t: ToolPill): string {
+  if (isControlTool(t.tool)) {
+    const label = t.label.trim() || CONTROL_FALLBACK[t.tool.slice("mcp__buddy__".length)] || "Working with your sessions";
+    switch (t.state) {
+      case "denied": return `${label} - denied`;
+      case "error": return `${label} - failed`;
+      default: return label;
+    }
+  }
   const [running, done, failed] = TOOL_TEXT[t.tool] ?? [t.tool, t.tool, `${t.tool} failed`];
-  const verb = t.state === "running" ? running : t.state === "error" ? failed : done;
+  const verb = t.state === "running" ? running : t.state === "error" || t.state === "denied" ? failed : done;
   return t.label ? `${verb}: ${t.label}` : verb;
 }
 
@@ -419,7 +448,7 @@ export type ChatSound = "search" | "finish" | "error" | "pop";
 
 const answered = (m: ChatModel): number => m.items.filter((it) => it.kind === "assistant" && it.durationMs !== null).length;
 const failures = (m: ChatModel): number => m.items.filter((it) => it.kind === "error" || (it.kind === "assistant" && it.error !== null)).length;
-const running = (m: ChatModel): number => m.items.reduce((n, it) => n + (it.kind === "assistant" ? it.tools.filter((t) => t.state === "running").length : 0), 0);
+const running = (m: ChatModel): number => m.items.reduce((n, it) => n + (it.kind === "assistant" ? runningWeb(it.tools) : 0), 0);
 
 export interface ChatMoments { sounds: ChatSound[]; emote: BotEmoteName | null; finished: boolean; failed: boolean }
 

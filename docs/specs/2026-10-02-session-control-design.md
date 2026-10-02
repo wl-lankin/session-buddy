@@ -12,15 +12,22 @@ The chat can start and steer Claude Code sessions: "start a session in Nexa with
 
 ### 1. Background sessions ("workers"), `src-tauri/src/workers.rs`
 
-A worker is a headless `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --model <alias>` child in the project folder, started by Session Buddy. It is NOT marked SB_CHAT: its hooks reach the island like any session, so it shows up in the tabs with steps, agents, limits and, importantly, permission requests and questions as the usual Allow/Deny cards. Nobody has to approve anything in a terminal.
+Claude Code 2.1.287 has first-party background sessions, so nothing is hand-rolled: a session is `claude --bg --model <alias> -n "Buddy: <project>" -- "<prompt>"`, run in the project folder. The CLI's daemon owns the process (it survives Session Buddy). It is NOT muted (no SB_CHAT): its hooks reach the island like any session, so it shows up in the tabs with steps, agents, limits and, importantly, permission requests and questions as the usual Allow/Deny cards (probed: the session runs in a daemon pty, `PermissionRequest` hooks fire, a hook answer is honoured). Nobody has to approve anything in a terminal.
 
-- The manager keeps `worker id -> { child, session_id (from the `system init` line), project, model, started_at, state, recent output }`; the output is the assistant text per turn, last ones only (cap the memory), never written to disk.
-- `send_prompt` writes a stream-json user line to the child's stdin. One prompt at a time per worker: a second one while the worker is busy is refused with a clear message.
-- Stop: the interrupt control request first (works, see the chat spec), then kill after a short grace period. All workers are killed when the app quits.
-- Limit: `chatMaxWorkers` (default 3) at once.
-- The binary lookup, spawn flags helpers and the idle handling are shared with `chat.rs` where that is natural (extract, do not copy).
-- Never `--dangerously-skip-permissions`, never `--permission-mode bypassPermissions`. Models are the fixed set haiku, sonnet, opus.
-- A worker is flagged in the session JSON: `managed: true`.
+Probed with the real CLI (2.1.287):
+- `claude --bg ...` prints `backgrounded · <id> · <name>`; `<id>` is the first 8 characters of the session id the hooks report. `--model` and the working directory are honoured. A folder Claude Code does not trust yet is refused ("Workspace not trusted"); the tool says so without the path.
+- `claude agents --json` lists interactive and background sessions: `id` (short, background only), `sessionId`, `cwd`, `kind`, `name`, `startedAt`, `pid` (while running), `status` (`busy`, `idle`, `waiting`), `state` (`working`, `blocked`, `done`, `stopped`). `--all` adds finished ones.
+- `claude stop <id>` stops it and keeps the conversation; `claude rm <id>` deletes it.
+- `claude logs <id>` is the raw terminal screen with escape sequences, not usable as text. "Recent output" for `get_session` is the session's last assistant message and steps from the hooks.
+- `claude --bg --resume <session-id> -- "<prompt>"` WITHOUT other flags continues a stopped session under the same id with its saved options. While the session is still running (even idle) it starts a copy instead, and with extra flags it also starts a copy. So a follow-up prompt is: refuse when the session is busy or waiting; when idle, `stop` it, wait until it is gone, then resume with the prompt; if the CLI still reports another id, stop that copy and report an error.
+- Without a TTY the permission mode is `default`: a permission prompt waits (`status: waiting`) until the island (or an attached terminal) answers. No permission flag is ever passed.
+
+Tracking: an in-memory record of the ids this run started, plus `claude agents --json` (read at start-up, before each tool and after each start). A session is managed when its name starts with `Buddy: ` (survives an app restart, no file on disk). The session id from `agents` is flagged in the store, so the snapshot carries `managed: true` whichever arrives first, the flag or the first hook. Only managed sessions can be steered.
+
+- Limit: `chatMaxWorkers` (default 3) counts managed sessions that are running and not idle (`busy`, `waiting`); idle ones cost no parallel work.
+- Models: the fixed set haiku, sonnet, opus. Never `--dangerously-skip-permissions`, never `--permission-mode bypassPermissions`.
+- Workers are not stopped when the app quits: the daemon owns them, the user can `claude attach` or stop them from the island.
+- `worker_attach(session_id)` opens Terminal.app on `claude attach <id>` (macOS; the shell and AppleScript quoting are covered by tests, only a validated id and the quoted binary path enter the script).
 
 ### 2. MCP tools for the chat, served by the relay
 
@@ -39,6 +46,8 @@ Tools (names as the model sees them: `mcp__buddy__<name>`):
 
 The chat can never answer a permission request or a question of a session: that stays with the user. No tool for it.
 
+How an action is confirmed (verified headless with the real CLI): the chat child gets `--permission-prompt-tool mcp__buddy__approve` and `--allowedTools` for the three read tools only. The CLI hides `approve` from the model and calls it with `{tool_name, input, tool_use_id}` whenever the model uses an action tool; the app validates, shows the card, and answers `{"behavior":"allow","updatedInput":{...}}` (the CLI runs the tool with `updatedInput`, so the folder the user chose arrives that way) or `{"behavior":"deny","message":"denied by the user"}`. An allow is stored as a one-time grant for exactly those arguments (10 minutes); the action tool itself refuses to run without a matching grant, so nothing runs without a click even if the permission path were bypassed.
+
 Safety rules the app enforces, not the model:
 - `project` (what the model asks for) is a folder name or path that resolves, after canonicalisation (symlinks resolved), to a folder inside one of `chatProjectRoots` (direct children or deeper). Everything else is refused with the list of allowed roots. Only a folder the user chose in the dialog on the card may lie elsewhere; it must exist and be a directory.
 - `model` must be one of the fixed set; `prompt` and `text` at most 4000 characters, no control characters except newlines.
@@ -53,11 +62,15 @@ An action request is an interaction without a session. It reaches the front end 
 interface ActionRequest {
   requestId: string;
   title: string;                       // "Start a session"
-  rows: { label: string; value: string }[];   // Project, Folder, Model
+  rows: { label: string; value: string }[];   // Project, Model
   body: string | null;                 // the full prompt, scrollable
+  folder: { path: string; options: string[] } | null;   // the folder to use, other matches for the model's name
+  host: { value: string; options: { id: string; label: string }[] } | null;  // "Runs in"
   deadline: number;                    // epoch ms, like the other interactions
 }
 ```
+
+`rows` carry Project and Model; the folder is shown from `folder`, with a "Choose..." button (`pick_folder(startDir?)`). The answer is `{ allow: boolean, folder?: string, host?: string }`. A chosen folder must exist and be a directory; it is trusted even outside the project roots.
 
 The island opens on it like on an approval (pinned until answered, Buddy in the `approval` state, same sounds) with Allow / Deny and "Answer in terminal" not offered.
 
@@ -74,6 +87,8 @@ The island opens on it like on an approval (pinned until answered, Buddy in the 
 - While a worker runs a turn its status already shows via the hooks.
 
 ### 6. Settings
+
+Stored as `chatMode` (`web` default, `control`), `chatProjectRoots` (existing directories only, canonical, at most 20; checked on save), `chatMaxWorkers` (3, range 1 to 6) and `chatSessionHost` (`background` default). `ChatStatus` also reports `mode` and `controlReady` (control needs at least one existing project root); a mode change restarts the chat process.
 
 Chat section, "Control": folders the chat may start sessions in (add / remove, validated: must exist and be a directory), max parallel background sessions, and the default place sessions run in (`chatSessionHost`: `background` (default), `terminal` (Terminal.app), `iterm`, `warp`, `wt` on Windows; only the ones that exist on this machine are offered). Everything else about control lives in the chat header.
 

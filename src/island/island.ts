@@ -17,6 +17,7 @@ import type { ChatAction, ChatEvent } from "../model/chat";
 import { FINISH_CARD_S, mergeFinish, planFinish, playsSound, type FinishItem } from "../model/finish";
 import { newPlan, planSession } from "../model/plan";
 import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";
+import { newActionIds } from "../model/actions";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
@@ -85,6 +86,8 @@ export class Island {
   private engine = new BotEngine();
   private chat: ChatController;
   private chatShown = false;
+  /** A confirmation card took the island from the chat: go back to the chat when it is answered. */
+  private resumeChat = false;
   /** The state the chat put in State.stateOverride, so only that one is ever cleared. */
   private chatApplied: BotStateName | null = null;
   private greeting = new Greeting();
@@ -180,6 +183,19 @@ export class Island {
         models: () => this.chat.models(),
         typing: (on) => this.chat.typing(on),
       },
+      pickFolder: (startDir) => Bridge.pickFolder(startDir),
+      worker: {
+        send: async (id, text) => {
+          const error = await Bridge.workerSend(id, text);
+          Sound.play(error ? "error" : "send");
+          return error;
+        },
+        stop: async (id) => {
+          const error = await Bridge.workerStop(id);
+          Sound.play(error ? "error" : "blip");
+          return error;
+        },
+      },
       toggleRecent: () => {
         State.showRecent = !State.showRecent;
         Sound.play("blip");
@@ -252,7 +268,7 @@ export class Island {
   }
 
   private defaultView(): IslandViewName {
-    if (pendingQueue(State.sessions, State.focusId).length) return "interaction";
+    if (State.snapshot.actions.length || pendingQueue(State.sessions, State.focusId).length) return "interaction";
     if (planSession(State.sessions, State.focusId)) return "plan";
     // Recent sessions alone still open the session view: its "Recent" pill shows them.
     return State.allSessions.length ? "session" : "empty";
@@ -361,6 +377,7 @@ export class Island {
 
   /** Something in a session waits for the user: the chat never masks it. */
   private needsUser(): boolean {
+    if (State.snapshot.actions.length) return true;
     return State.allSessions.some((s) => s.live && (s.pending.length > 0 || s.status === "needs_you" || s.plan !== null));
   }
 
@@ -444,12 +461,16 @@ export class Island {
 
   onSnapshot(snap: Snapshot) {
     const prev = State.sessions;
-    State.snapshot = snap;
+    const prevActions = State.snapshot.actions;
+    State.snapshot = snap.actions ? snap : { ...snap, actions: [] };
+    const actions = State.snapshot.actions;
+    const newAction = newActionIds(prevActions, actions).length > 0;
     const { focusId, newlyPending } = resolveFocus(State.focusId, prev, State.sessions);
     State.focusId = focusId;
     const planned = newPlan(prev, snap.sessions);
 
     const queue = pendingQueue(snap.sessions, focusId);
+    const waiting = queue.length + actions.length;
     const live = new Set(queue.map((q) => q.item.requestId));
     for (const id of live) {
       if (!this.acked.has(id)) {
@@ -459,20 +480,26 @@ export class Island {
     }
     for (const id of [...this.acked]) if (!live.has(id)) this.acked.delete(id);
 
-    if (newlyPending) {
+    if (newlyPending || (newAction && !(State.mode === "expanded" && State.view === "interaction"))) {
+      if (newAction && State.mode === "expanded" && State.view === "chat") this.resumeChat = true;
       State.isPinned = true;
+      if (newAction) Sound.play("approval");
       this.alert("interaction");
-    } else if (planned && queue.length === 0) {
+    } else if (newAction) {
+      Sound.play("approval");
+    } else if (planned && waiting === 0) {
       Sound.play("approval");
       State.focusId = planned;
       // The same snapshot may have resolved a reply card: give the keyboard back.
       this.setKeyboard(false);
       this.showPlan();
-    } else if (queue.length === 0 && State.view === "interaction") {
+    } else if (waiting === 0 && State.view === "interaction") {
       this.syncPin();
       this.setKeyboard(false);
       this.rearmCollapse();
-      if (State.mode === "expanded") this.setView(this.defaultView());
+      const back = this.resumeChat;
+      this.resumeChat = false;
+      if (State.mode === "expanded") this.setView(back ? "chat" : this.defaultView());
       else State.view = "session";
     } else if (State.view === "plan" && !planSession(State.sessions, State.focusId)) {
       if (State.mode === "expanded") {
@@ -541,7 +568,8 @@ export class Island {
   }
 
   private async answer(requestId: string, answer: unknown) {
-    const deny = typeof answer === "object" && answer !== null && (answer as { behavior?: string }).behavior === "deny";
+    const verdict = typeof answer === "object" && answer !== null ? (answer as { behavior?: string; allow?: boolean }) : {};
+    const deny = verdict.behavior === "deny" || verdict.allow === false;
     Sound.play(deny ? "blip" : "approve");
     const error = await Bridge.answer(requestId, answer);
     if (error) {

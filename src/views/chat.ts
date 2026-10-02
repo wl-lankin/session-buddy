@@ -7,7 +7,8 @@ import {
   activeAnswer, buildSessionBlock, buildSuggestions, canSend, dotState, isBusy, sessionChip, statusText, toolText,
   type ChatItem, type ChatState, type Suggestion, type ToolPill,
 } from "../model/chat";
-import { modelBadge, offLines } from "../model/chatmodel";
+import { modelBadge, offLead, offLines } from "../model/chatmodel";
+import { CONTROL_HINT, controlSuggestions, modeChoice, modeSwitch } from "../model/chatcontrol";
 import {
   choicePatch, initialRow, modelsStale, pickerLock, pickerRows, selectedModel, stepRow, type LocalModels, type PickerRow,
 } from "../model/chatpicker";
@@ -49,7 +50,7 @@ interface Row {
 }
 
 function pill(t: ToolPill): HTMLElement {
-  const lead = t.state === "running" ? h("i", { class: "c-spin" }) : svg(t.state === "error" ? ICONS.xmark : ICONS.check, 11, { stroke: 2.6 });
+  const lead = t.state === "running" ? h("i", { class: "c-spin" }) : svg(t.state === "error" || t.state === "denied" ? ICONS.xmark : ICONS.check, 11, { stroke: 2.6 });
   return h("span", { class: `c-pill ${t.state}`, title: toolText(t) }, lead, h("span", { class: "c-pill-text", text: toolText(t) }));
 }
 
@@ -74,6 +75,22 @@ export function buildChatView(actions: ViewActions): ViewHost {
     svg(ICONS.chevronDown, 9, { stroke: 2.8 }),
   );
   const modelEl = h("span", { class: "c-model" }, picker);
+  const modeBtns = new Map<string, HTMLButtonElement>();
+  const modeEl = h("span", { class: "c-modesw", role: "group", "aria-label": "Chat mode" });
+  for (const o of modeSwitch("web", false).options) {
+    const b = h("button", {
+      class: "c-mode",
+      type: "button",
+      text: o.label,
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        const next = modeChoice(State.settings.chatMode, o.id, isBusy(State.chat));
+        if (next) chat.setModel({ chatMode: next });
+      },
+    });
+    modeBtns.set(o.id, b);
+    modeEl.append(b);
+  }
   const menu = h("div", { class: "c-menu", role: "menu", "aria-label": "Chat model" });
   const power = h("button", {
     class: "c-power",
@@ -97,7 +114,7 @@ export function buildChatView(actions: ViewActions): ViewHost {
   const head = h(
     "div",
     { class: "c-head" },
-    h("div", { class: "c-who" }, h("div", { class: "c-title", text: "Chat with Buddy" }), h("div", { class: "c-sub" }, dot, statusEl, modelEl)),
+    h("div", { class: "c-who" }, h("div", { class: "c-title", text: "Chat with Buddy" }), h("div", { class: "c-sub" }, dot, statusEl, modelEl, modeEl)),
     h("span", { class: "grow" }),
     power,
     newBtn,
@@ -508,12 +525,14 @@ export function buildChatView(actions: ViewActions): ViewHost {
 
   function offCard(): HTMLElement {
     const missing = State.chat.claudeFound === false;
-    const lines = offLines({ provider: State.chat.provider, model: State.chat.model, webSearch: State.chat.webSearch, idleMinutes: State.settings.chatIdleMinutes });
+    const mode = State.settings.chatMode;
+    const web = mode === "web" && State.chat.webSearch;
+    const lines = offLines({ provider: State.chat.provider, model: State.chat.model, webSearch: web, idleMinutes: State.settings.chatIdleMinutes, mode });
     return h(
       "div",
       { class: "c-off" },
       h("div", { class: "c-off-title", text: "Chat with Buddy" }),
-      h("p", { class: "c-off-lead", text: State.chat.webSearch ? "Quick questions, a look at one of your sessions, or a web search, without leaving the island." : "Quick questions or a look at one of your sessions, without leaving the island." }),
+      h("p", { class: "c-off-lead", text: offLead({ webSearch: web, mode }) }),
       h("ul", { class: "c-off-list" }, ...lines.map((text) => h("li", { text }))),
       missing ? h("div", { class: "c-warn", text: "The Claude Code CLI was not found. Install it, or set its path in Settings." }) : null,
       h(
@@ -525,7 +544,17 @@ export function buildChatView(actions: ViewActions): ViewHost {
     );
   }
 
-  function emptyCard(list: Suggestion[]): HTMLElement {
+  function controlHint(): HTMLElement {
+    return h(
+      "div",
+      { class: "c-empty c-ctl" },
+      h("div", { class: "c-hello", text: CONTROL_HINT.title }),
+      h("div", { class: "c-hello-sub", text: CONTROL_HINT.text }),
+      btn(CONTROL_HINT.button, "primary", () => actions.openSettings()),
+    );
+  }
+
+  function emptyCard(list: Suggestion[], control: boolean): HTMLElement {
     const chips = list.map((s) =>
       h(
         "button",
@@ -538,7 +567,7 @@ export function buildChatView(actions: ViewActions): ViewHost {
       "div",
       { class: "c-empty" },
       h("div", { class: "c-hello", text: "Hi, I'm Buddy." }),
-      h("div", { class: "c-hello-sub", text: "Ask me anything, or let me look at one of your sessions." }),
+      h("div", { class: "c-hello-sub", text: control ? "Ask what your sessions are doing, or have me start one for you." : "Ask me anything, or let me look at one of your sessions." }),
       h("div", { class: "c-chips" }, ...chips),
       State.chat.claudeFound === false ? h("div", { class: "c-warn", text: "The Claude Code CLI was not found. Set its path in Settings." }) : null,
     );
@@ -604,6 +633,17 @@ export function buildChatView(actions: ViewActions): ViewHost {
       picker.title = locked ? lock.title : `${badge.title}. ${lock.title}`;
       if (pickName.textContent !== badge.name) pickName.textContent = badge.name;
       pickLocal.style.display = badge.local ? "" : "none";
+      const sw = modeSwitch(State.settings.chatMode, isBusy(m));
+      modeEl.title = sw.title;
+      modeEl.classList.toggle("locked", sw.disabled);
+      for (const o of sw.options) {
+        const b = modeBtns.get(o.id);
+        if (!b) continue;
+        b.classList.toggle("on", o.active);
+        b.setAttribute("aria-pressed", String(o.active));
+        b.setAttribute("aria-disabled", String(sw.disabled));
+        b.title = sw.disabled ? sw.title : o.title;
+      }
       if (locked) closeMenu(false);
       else if (menuOpen) renderMenu();
       power.setAttribute("aria-checked", String(m.enabled));
@@ -623,17 +663,19 @@ export function buildChatView(actions: ViewActions): ViewHost {
         stick = true;
       }
       if (next === "off") {
-        const key = `${m.claudeFound}|${State.settings.chatIdleMinutes}|${m.provider}|${m.model}|${m.webSearch}`;
+        const key = `${m.claudeFound}|${State.settings.chatIdleMinutes}|${m.provider}|${m.model}|${m.webSearch}|${State.settings.chatMode}`;
         if (col.dataset.key !== key) {
           col.dataset.key = key;
           col.replaceChildren(offCard());
         }
       } else if (next === "empty") {
-        const list = buildSuggestions(State.allSessions, State.focusId, m.webSearch);
-        const key = `${list.map((s) => s.label).join("|")}|${m.claudeFound}`;
+        const control = State.settings.chatMode === "control";
+        const needsFolder = control && !m.controlReady;
+        const list = control ? controlSuggestions(State.allSessions, State.focusId) : buildSuggestions(State.allSessions, State.focusId, m.webSearch);
+        const key = needsFolder ? `hint|${m.claudeFound}` : `${control}|${list.map((s) => s.label).join("|")}|${m.claudeFound}`;
         if (col.dataset.key !== key) {
           col.dataset.key = key;
-          col.replaceChildren(emptyCard(list));
+          col.replaceChildren(needsFolder ? controlHint() : emptyCard(list, control));
         }
       } else {
         reconcile(m.items);

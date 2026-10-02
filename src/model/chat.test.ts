@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import type { Session } from "../core/types";
 import {
   activeAnswer, buildOverviewBlock, buildSessionBlock, buildSuggestions, canSend, chatBuddy, chatMoments, clip, composePrompt, CONTEXT_LIMITS,
-  initialChat, isBusy, reduceChat, statusText, toolText, type ChatAction, type ChatEvent, type ChatModel,
+  initialChat, isBusy, isSearching, reduceChat, statusText, toolText, type ChatAction, type ChatEvent, type ChatModel,
 } from "./chat";
 
 const session = (p: Partial<Session> = {}): Session => ({
   id: "a", project: "pushdocs", cwd: "/p", branch: "PDD-1", termProgram: null, model: "Opus 5.5", status: "working", statusSince: 0,
   lastPrompt: "fix the 409", lastMessage: "Done with the fix.", steps: [], agents: [], background: [], pending: [], startedAt: 0,
-  lastEventAt: 0, pid: null, live: true, plan: null,
+  lastEventAt: 0, pid: null, live: true, plan: null, managed: false,
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: null, contextTokens: null, contextSize: null, costUsd: null }, ...p,
 });
 
 const on = (m = initialChat()): ChatModel => reduceChat(reduceChat(m, { type: "enabled", on: true, at: 1 }), {
-  type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: 1,
+  type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true, mode: "web", controlReady: false }, at: 1,
 });
 const ev = (m: ChatModel, event: ChatEvent, viewing = true, at = 10): ChatModel => reduceChat(m, { type: "event", event, at, viewing });
 const run = (m: ChatModel, ...actions: ChatAction[]): ChatModel => actions.reduce(reduceChat, m);
@@ -165,7 +165,7 @@ describe("reduceChat dividers and status", () => {
   });
 
   it("chat_status sets enabled and whether the CLI exists", () => {
-    const m = reduceChat(initialChat(), { type: "status", status: { enabled: true, state: "off", claudeFound: false, provider: "claude", model: "haiku", webSearch: true }, at: 1 });
+    const m = reduceChat(initialChat(), { type: "status", status: { enabled: true, state: "off", claudeFound: false, provider: "claude", model: "haiku", webSearch: true, mode: "web", controlReady: false }, at: 1 });
     expect(m.enabled).toBe(true);
     expect(m.claudeFound).toBe(false);
     expect(canSend(m)).toBe(false);
@@ -339,5 +339,45 @@ describe("Buddy", () => {
     const a = ev(run(model(), send()), { type: "delta", id: "t1", text: "a" });
     const b = ev(a, { type: "delta", id: "t1", text: "b" });
     expect(chatMoments(a, b, true)).toEqual({ sounds: [], emote: null, finished: false, failed: false });
+  });
+});
+
+describe("control tools", () => {
+  const tool = (state: "running" | "done" | "error" | "denied", name = "start_session", label = "Starting a session in Nexa") =>
+    ({ type: "tool", id: "t1", callId: "c1", tool: `mcp__buddy__${name}`, label, state }) as const;
+
+  it("uses the backend's label as is", () => {
+    expect(toolText({ callId: "c", tool: "mcp__buddy__start_session", label: "Starting a session in Nexa", state: "running" })).toBe("Starting a session in Nexa");
+    expect(toolText({ callId: "c", tool: "mcp__buddy__send_prompt", label: "Sent a prompt to Nexa", state: "done" })).toBe("Sent a prompt to Nexa");
+  });
+  it("says denied, and failed", () => {
+    expect(toolText({ callId: "c", tool: "mcp__buddy__stop_session", label: "Stopping Nexa", state: "denied" })).toBe("Stopping Nexa - denied");
+    expect(toolText({ callId: "c", tool: "mcp__buddy__stop_session", label: "Stopping Nexa", state: "error" })).toBe("Stopping Nexa - failed");
+  });
+  it("falls back to a readable name without a label", () => {
+    expect(toolText({ callId: "c", tool: "mcp__buddy__list_sessions", label: "", state: "done" })).toBe("Looking at your sessions");
+    expect(toolText({ callId: "c", tool: "mcp__buddy__nope", label: "", state: "done" })).toBe("Working with your sessions");
+  });
+  it("keeps web tools as they were", () => {
+    expect(toolText({ callId: "c", tool: "WebSearch", label: "x", state: "running" })).toBe("Searching the web: x");
+    expect(toolText({ callId: "c", tool: "WebSearch", label: "x", state: "denied" })).toBe("Web search failed: x");
+  });
+  it("a running control tool is not a web search: no search status, no search sound", () => {
+    const m = ev(ev(on(), { type: "turn", id: "t1" }), tool("running"));
+    expect(isSearching(m)).toBe(false);
+    expect(statusText(m)).not.toBe("Searching the web");
+    expect(chatMoments(ev(on(), { type: "turn", id: "t1" }), m, true).sounds).not.toContain("search");
+  });
+  it("a denied pill stays denied when the turn ends", () => {
+    let m = ev(ev(on(), { type: "turn", id: "t1" }), tool("running"));
+    m = ev(m, tool("denied"));
+    m = ev(m, { type: "done", id: "t1", text: "Okay.", durationMs: 5 });
+    expect(m.items.find((i) => i.kind === "assistant" && i.tools[0].state === "denied")).toBeDefined();
+  });
+  it("a running control tool settles when the turn ends", () => {
+    let m = ev(ev(on(), { type: "turn", id: "t1" }), tool("running"));
+    m = ev(m, { type: "done", id: "t1", text: "ok", durationMs: 5 });
+    const a = m.items.find((i) => i.kind === "assistant");
+    expect(a && a.kind === "assistant" && a.tools[0].state).toBe("done");
   });
 });

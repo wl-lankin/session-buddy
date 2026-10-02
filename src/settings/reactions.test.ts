@@ -10,6 +10,10 @@ describe("reactionFor", () => {
     expect(reactionFor({ kind: "chat", on: true })?.emote).toBe("wink");
     expect(reactionFor({ kind: "chat", on: false })?.emote).toBe("yawn");
   });
+  it("is happy about a folder that was added, silent about a removal", () => {
+    expect(reactionFor({ kind: "folder", added: true })?.emote).toBe("happy");
+    expect(reactionFor({ kind: "folder", added: false })).toBeNull();
+  });
   it("is proud of an install, annoyed by an uninstall, shows the error face on failure", () => {
     expect(reactionFor({ kind: "install", install: true, ok: true })?.emote).toBe("proud");
     expect(reactionFor({ kind: "install", install: false, ok: true })?.emote).toBe("annoyed");

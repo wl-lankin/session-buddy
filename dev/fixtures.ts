@@ -1,14 +1,14 @@
 // Five sessions that exercise every part of the island, plus the account states
 // the limits block can be in.
 
-import type { Session, Snapshot, Usage } from "../src/core/types";
+import type { ActionRequest, Session, Snapshot, Usage } from "../src/core/types";
 import type { ChatAction, ChatEvent } from "../src/model/chat";
 
 const base = (id: string, project: string, now: number, p: Partial<Session>): Session => ({
   id, project, cwd: `C:\\Projects\\${project}`, branch: null, termProgram: "WarpTerminal", model: "Opus 5.5",
   status: "idle", statusSince: now, lastPrompt: null, lastMessage: null, steps: [], agents: [], background: [],
   stats: { linesAdded: 0, linesRemoved: 0, contextUsedPct: 12, contextTokens: 24_000, contextSize: 200_000, costUsd: 0.2 },
-  pending: [], startedAt: now, lastEventAt: now, pid: null, live: true, plan: null, ...p,
+  pending: [], startedAt: now, lastEventAt: now, pid: null, live: true, plan: null, managed: false, ...p,
 });
 
 const ACCOUNT = { email: "wolfgang.linz@example-company.de", org: "Example Company GmbH", plan: "Team" };
@@ -40,6 +40,7 @@ export function demoUsage(now: number, kind: "ok" | "stale" | "error"): Usage {
 export function demoSnapshot(now: number): Snapshot {
   return {
     now,
+    actions: [],
     usage: demoUsage(now, "ok"),
     sessions: [
       base("a", "pushdocs", now, {
@@ -104,11 +105,11 @@ export function demoSnapshot(now: number): Snapshot {
 export function demoChat(now: number, kind: "full" | "empty" | "off" = "full"): ChatAction[] {
   const at = (s: number) => now - (600 - s) * 1000;
   const ev = (s: number, event: ChatEvent): ChatAction => ({ type: "event", event, at: at(s), viewing: true });
-  if (kind !== "full") return [{ type: "status", status: { enabled: kind === "empty", state: kind === "empty" ? "ready" : "off", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: at(0) }];
+  if (kind !== "full") return [{ type: "status", status: { enabled: kind === "empty", state: kind === "empty" ? "ready" : "off", claudeFound: true, provider: "claude", model: "haiku", webSearch: true, mode: "web", controlReady: false }, at: at(0) }];
   const first = "**pushdocs** is fixing the DATEV 409 handling.\n\n1. It read `DatevClient.php` and searched for the fault\n2. The last test run failed, so it is editing the client again\n\nNothing needs you right now. To rerun the failing test yourself:\n\n```bash\nphp artisan test --filter Datev\n```";
   const second = "Claude Code 2.1 starts about twice as fast and has a tidier `/permissions` screen.\n\nSee the [release notes](https://docs.claude.com/en/release-notes/claude-code) for the full list.";
   return [
-    { type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true }, at: at(0) },
+    { type: "status", status: { enabled: true, state: "ready", claudeFound: true, provider: "claude", model: "haiku", webSearch: true, mode: "web", controlReady: false }, at: at(0) },
     { type: "send", text: "What is pushdocs doing right now?", context: { kind: "session", label: "pushdocs \u00B7 PDD-1981" }, at: at(10) },
     ev(11, { type: "turn", id: "t1" }),
     ev(12, { type: "delta", id: "t1", text: first }),
@@ -121,5 +122,86 @@ export function demoChat(now: number, kind: "full" | "empty" | "off" = "full"): 
     ev(504, { type: "tool", id: "t2", callId: "c1", tool: "WebSearch", label: "claude code release notes", state: "done" }),
     ev(505, { type: "delta", id: "t2", text: second }),
     ev(506, { type: "done", id: "t2", text: second, durationMs: 9800 }),
+  ];
+}
+
+/** A session Buddy started: it shows the marker and the prompt line. */
+export function demoManaged(now: number, status: Session["status"] = "idle"): Session {
+  return base("w1", "nexa-web", now, {
+    cwd: "/Users/alex/Projects/nexa-web", branch: "main", status, managed: true, termProgram: null, model: "Sonnet 4.5",
+    lastPrompt: "Fix the inbox search: it ignores umlauts and the sort order is wrong.",
+    lastMessage: "Done. The search now folds umlauts and sorts by the newest message.\nI added two Pest tests for it.",
+    steps: [
+      { tool: "Read", label: "Read \u00B7 InboxSearch.php", at: now, ok: true },
+      { tool: "Edit", label: "Edit \u00B7 InboxSearch.php", at: now, ok: true },
+      { tool: "Bash", label: "Run \u00B7 php artisan test --filter Inbox", at: now, ok: status === "working" ? null : true },
+    ],
+  });
+}
+
+const LONG_PROMPT = [
+  "Fix the inbox search in nexa-web.",
+  "",
+  "Problems I see:",
+  "1. Searching for \"Müller\" does not find \"Mueller\" and the other way around.",
+  "2. The result list is sorted by id, it should be the newest message first.",
+  "3. A search with only whitespace returns every message and is slow.",
+  "",
+  "Please:",
+  "- find where the query is built (probably app/Search/InboxSearch.php)",
+  "- fold umlauts and ss/ß on both sides, in a way that works with the existing MySQL collation",
+  "- sort by sent_at descending",
+  "- treat an empty or whitespace-only query as no search",
+  "- add Pest tests for all three cases",
+  "",
+  "Do not touch the migrations and do not change the public API of the search class. Run the test suite before you finish and tell me what you changed in two or three sentences.",
+].join("\n");
+
+/** The confirmation the chat raises for "Start a session". `many` gives a project name that matches several folders. */
+export function demoAction(now: number, project = "nexa-web", many = true): ActionRequest {
+  const options = many ? ["/Users/alex/Projects/nexa-web", "/Users/alex/Work/client-sites/nexa-web", "/Users/alex/Projects/archive/nexa-web-2023"] : [];
+  return {
+    requestId: `act-${Math.round(now)}`,
+    title: "Start a session",
+    rows: [
+      { label: "Project", value: project },
+      { label: "Folder", value: "/Users/alex/Projects/nexa-web" },
+      { label: "Model", value: "Sonnet" },
+    ],
+    body: LONG_PROMPT,
+    folder: { path: "/Users/alex/Projects/nexa-web", options },
+    host: { value: "background", options: [{ id: "background", label: "Background" }] },
+    deadline: now + 110_000,
+  };
+}
+
+/** A control-mode chat: a session overview, a start the user allowed, a stop the user denied. */
+export function demoControlChat(now: number, ready = true): ChatAction[] {
+  const at = (s: number) => now - (600 - s) * 1000;
+  const ev = (s: number, event: ChatEvent): ChatAction => ({ type: "event", event, at: at(s), viewing: true });
+  const tool = (s: number, id: string, callId: string, name: string, label: string, state: "running" | "done" | "denied" | "error"): ChatAction =>
+    ev(s, { type: "tool", id, callId, tool: `mcp__buddy__${name}`, label, state });
+  const status = { enabled: true, state: "ready" as const, claudeFound: true, provider: "claude" as const, model: "sonnet", webSearch: false, mode: "control" as const, controlReady: ready };
+  const first = "Two sessions are working, **bankconnect** waits for a permission.";
+  const second = "Started. **nexa-web** runs in the background.";
+  const third = "Okay, I left **nexa-web** running.";
+  return [
+    { type: "status", status, at: at(0) },
+    { type: "send", text: "What are my sessions doing?", context: { kind: "overview", label: "All sessions" }, at: at(10) },
+    ev(11, { type: "turn", id: "t1" }),
+    tool(12, "t1", "c1", "list_sessions", "Looking at your sessions", "done"),
+    ev(13, { type: "delta", id: "t1", text: first }),
+    ev(14, { type: "done", id: "t1", text: first, durationMs: 2100 }),
+    { type: "send", text: "Start a session in nexa-web to fix the inbox search", context: null, at: at(60) },
+    ev(61, { type: "turn", id: "t2" }),
+    tool(62, "t2", "c2", "list_projects", "Looking at your projects", "done"),
+    tool(63, "t2", "c3", "start_session", "Started a session in nexa-web", "done"),
+    ev(64, { type: "delta", id: "t2", text: second }),
+    ev(65, { type: "done", id: "t2", text: second, durationMs: 11_400 }),
+    { type: "send", text: "Stop it again", context: null, at: at(120) },
+    ev(121, { type: "turn", id: "t3" }),
+    tool(122, "t3", "c4", "stop_session", "Stopping nexa-web", "denied"),
+    ev(123, { type: "delta", id: "t3", text: third }),
+    ev(124, { type: "done", id: "t3", text: third, durationMs: 6200 }),
   ];
 }

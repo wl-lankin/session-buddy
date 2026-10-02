@@ -29,3 +29,21 @@ export function ollamaTestText(reachable: boolean, count: number, url: string): 
   if (count === 0) return "Reachable, but it has no models yet. Try: ollama pull qwen2.5:7b";
   return `Reachable - ${count} ${count === 1 ? "model" : "models"}`;
 }
+
+/** Adds a project folder: trimmed, a trailing separator dropped, no duplicate. Returns the same array when nothing changes. */
+export function addRoot(roots: string[], path: string | null | undefined): string[] {
+  const p = (path ?? "").trim().replace(/(?<=.)[\\/]+$/, "");
+  return !p || roots.includes(p) ? roots : [...roots, p];
+}
+
+export const removeRoot = (roots: string[], path: string): string[] => roots.filter((r) => r !== path);
+
+/** A folder as two parts: its name, and where it lies. */
+export function rootParts(path: string): { name: string; dir: string } {
+  const trimmed = path.replace(/(?<=.)[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut < 0 ? { name: trimmed, dir: "" } : { name: trimmed.slice(cut + 1) || trimmed, dir: trimmed.slice(0, cut) || trimmed.slice(0, cut + 1) };
+}
+
+/** The hosts the settings offer; terminals come later. */
+export const SESSION_HOSTS: { id: string; label: string }[] = [{ id: "background", label: "Background" }];

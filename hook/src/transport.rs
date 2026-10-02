@@ -58,6 +58,26 @@ pub fn send(line: &str, wait: bool) -> Option<String> {
     await_answer(&lines, ACK_WAIT)
 }
 
+/// Sends one request line and returns the app's single reply line, whatever it takes up to `budget`.
+/// The error text is meant for the model: it says why nothing came back.
+pub fn request(line: &str, budget: Duration) -> Result<String, String> {
+    let mut conn = connect().ok_or("Session Buddy is not running. Start the app and try again.")?;
+    conn.write_all(line.as_bytes()).map_err(|_| "Session Buddy did not accept the request")?;
+    let _ = conn.flush();
+    let lines = spawn_line_reader(conn);
+    let deadline = Instant::now() + budget;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match lines.recv_timeout(left) {
+            Ok(l) if l.trim() == ACK_LINE => continue,
+            Ok(l) if !l.trim().is_empty() => return Ok(l),
+            Ok(_) => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => return Err("Session Buddy did not answer in time".into()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err("Session Buddy closed the connection without an answer".into()),
+        }
+    }
+}
+
 /// Reads lines on a worker thread so the ack wait can time out.
 fn spawn_line_reader(conn: Box<dyn Conn>) -> Receiver<String> {
     let (tx, rx) = mpsc::channel();

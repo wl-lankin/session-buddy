@@ -16,12 +16,13 @@ export function buildCompact(actions: ViewActions): ViewHost {
   const prev = h("button", { class: "icon-btn", title: "Previous session", onclick: (e: Event) => { e.stopPropagation(); actions.cycle(-1); } }, svg(ICONS.chevronLeft, 10, { stroke: 2.4 }));
   const next = h("button", { class: "icon-btn", title: "Next session", onclick: (e: Event) => { e.stopPropagation(); actions.cycle(1); } }, svg(ICONS.chevronRight, 10, { stroke: 2.4 }));
   const pager = h("span", { class: "c-pager" }, prev, page, next);
+  const chatBtn = h("button", { class: "icon-btn c-chat", title: "Chat with Buddy (/)", onclick: (e: Event) => { e.stopPropagation(); actions.openChat(); } }, svg(ICONS.bubble, 10));
   const status = h("span", { class: "c-status" });
   const activity = h("span", { class: "c-activity" });
   const el = h(
     "div",
     { class: "layer compact" },
-    h("div", { class: "c-row1" }, title, lines, ctx, pager),
+    h("div", { class: "c-row1" }, title, lines, ctx, pager, chatBtn),
     h("div", { class: "c-row2" }, status, activity),
   );
 
@@ -29,6 +30,7 @@ export function buildCompact(actions: ViewActions): ViewHost {
     el,
     sync() {
       const s = State.focus;
+      chatBtn.style.marginLeft = s ? "6px" : "auto";
       const all = State.sessions;
       if (!s) {
         keyed(title, "none", () => [document.createTextNode(State.allSessions.length ? "No live sessions" : "No sessions yet")]);

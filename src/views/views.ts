@@ -7,6 +7,7 @@ import { buildInteraction } from "./cards";
 import { buildFinished } from "./finished";
 import { buildPlan } from "./plan";
 import { buildChatView } from "./chat";
+import { buildUpdate } from "./update";
 import type { ChatModels } from "../core/bridge";
 import type { Settings } from "../core/state";
 import type { SuggestionContext } from "../model/chat";
@@ -24,6 +25,15 @@ export interface ChatActions {
   models(): Promise<ChatModels>;
   /** The user is (or stopped) typing in the composer: Buddy looks down at it. */
   typing(on: boolean): void;
+}
+
+export interface UpdateActions {
+  /** The pill: show the update card. */
+  open(): void;
+  /** "Install and restart" / "Retry": the only thing that starts an install. */
+  install(): void;
+  /** "Later": hides the pill for this version until the next app start. */
+  later(): void;
 }
 
 export interface WorkerActions {
@@ -68,6 +78,7 @@ export interface ViewActions {
   /** Leave the chat view for the sessions. */
   closeChat(): void;
   chat: ChatActions;
+  update: UpdateActions;
   /** The native folder dialog, opened at `startDir`; null when cancelled. */
   pickFolder(startDir?: string): Promise<string | null>;
   worker: WorkerActions;
@@ -108,5 +119,6 @@ export function buildViews(actions: ViewActions): Map<IslandViewName, ViewHost> 
     ["confused", simple("confused-view", "Ouch.", "Give Buddy a second.")],
     ["greeting", { el: h("div", { class: "view" }), sync() {} }],
     ["chat", buildChatView(actions)],
+    ["update", buildUpdate(actions)],
   ]);
 }

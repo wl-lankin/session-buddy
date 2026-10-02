@@ -5,7 +5,8 @@ import { ICONS } from "./icons";
 import { State } from "../core/state";
 import { fmtPct, level } from "../model/format";
 import { currentActivity, statusLine } from "../model/viewmodel";
-import { keyed, linesChanged, sessionName, statusDot } from "./parts";
+import { pillText } from "../model/update";
+import { keyed, linesChanged, sessionName, statusDot, updatePill } from "./parts";
 import type { ViewActions, ViewHost } from "./views";
 
 export function buildCompact(actions: ViewActions): ViewHost {
@@ -19,17 +20,19 @@ export function buildCompact(actions: ViewActions): ViewHost {
   const chatBtn = h("button", { class: "icon-btn c-chat", title: "Chat with Buddy (/)", onclick: (e: Event) => { e.stopPropagation(); actions.openChat(); } }, svg(ICONS.bubble, 10));
   const status = h("span", { class: "c-status" });
   const activity = h("span", { class: "c-activity" });
+  const pill = updatePill(() => actions.update.open());
   const el = h(
     "div",
     { class: "layer compact" },
     h("div", { class: "c-row1" }, title, lines, ctx, pager, chatBtn),
-    h("div", { class: "c-row2" }, status, activity),
+    h("div", { class: "c-row2" }, status, activity, pill.el),
   );
 
   return {
     el,
     sync() {
       const s = State.focus;
+      pill.set(pillText(State.update));
       chatBtn.style.marginLeft = s ? "6px" : "auto";
       const all = State.sessions;
       if (!s) {

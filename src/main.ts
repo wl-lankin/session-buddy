@@ -7,6 +7,7 @@ import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import type { Cue, Snapshot } from "./core/types";
 import type { ChatAction, ChatEvent } from "./model/chat";
+import type { UpdateInfo } from "./model/update";
 import { Island } from "./island/island";
 
 declare global {
@@ -22,7 +23,10 @@ async function main() {
   const island = new Island(root);
 
   const boot = await Bridge.boot();
-  if (boot) State.settings = { ...State.settings, ...boot.settings };
+  if (boot) {
+    State.settings = { ...State.settings, ...boot.settings };
+    State.appVersion = boot.version;
+  }
   island.applySettings();
 
   await onEvent<{ x: number; y: number }>("cursor", ({ x, y }) => island.onCursor(x, y));
@@ -32,6 +36,11 @@ async function main() {
     if (what === "open") island.open();
   });
   await onEvent<ChatEvent>("chat-event", (e) => island.onChatEvent(e));
+  await onEvent<UpdateInfo>("update-available", (u) => island.onUpdateAvailable(u));
+  await onEvent<null>("update-none", () => island.onUpdateNone());
+  await onEvent<{ message: string }>("update-error", (e) => island.onUpdateError(e.message));
+  await onEvent<{ downloaded: number; total: number | null }>("update-progress", (p) => island.onUpdateProgress(p.downloaded, p.total));
+  await onEvent<null>("update-ready", () => island.onUpdateReady());
   await onEvent<null>("hotkey", () => island.toggleFromHotkey());
   await onEvent<null>("screen-changed", () => void Bridge.reposition());
   // MacBook notch: the window starts at the top of the screen, the island hangs

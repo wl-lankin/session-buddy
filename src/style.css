@@ -815,6 +815,25 @@ body {
 .btn.danger { background: rgba(244, 80, 94, 0.16); color: var(--red-text); }
 .btn:disabled { opacity: 0.4; cursor: default; }
 
+/* Update notice: the pill on the strip and the compact card, and the update card. */
+.upd-pill { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; height: 16px; padding: 0 8px 0 7px; border: 0; border-radius: 999px; background: rgba(34, 211, 238, 0.14); color: var(--cyan); font: 600 10.5px var(--font); white-space: nowrap; cursor: pointer; }
+.upd-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.upd-pill:hover { background: rgba(34, 211, 238, 0.24); }
+.c-row2 .upd-pill { margin-left: auto; }
+.update-view { padding-bottom: 4px; }
+.u-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.u-head { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; white-space: nowrap; }
+.u-icon { display: grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; background: rgba(34, 211, 238, 0.16); color: var(--cyan); font: 700 11px var(--font); }
+.u-icon.bad { background: rgba(244, 80, 94, 0.16); color: var(--red-text); }
+.u-title { font: 600 14px var(--font); color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.u-sub { margin-left: 26px; font: 500 12px var(--font); color: var(--dim); }
+.u-notes { margin-left: 26px; max-height: 120px; padding: 8px 12px; border-radius: 10px; background: var(--block); border: 1px solid var(--block-edge); font: 400 12px/1.45 var(--font); color: var(--ink-2); user-select: text; }
+.u-error { margin-left: 26px; font: 500 12px/1.4 var(--font); color: var(--red-text); overflow-wrap: anywhere; user-select: text; }
+.u-bar { margin-left: 26px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.u-bar > i { display: block; height: 100%; border-radius: 3px; background: var(--cyan); transition: width 0.4s ease-out; }
+.u-bar.indeterminate > i { animation: sb-breathe 1.6s ease-in-out infinite; }
+.u-label { margin-left: 26px; font: 500 11.5px var(--font); color: var(--dim-2); font-variant-numeric: tabular-nums; }
+.u-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .plan-view { display: flex; flex-direction: column; gap: 8px; height: 100%; }
 .p-plan {
   flex: 1 1 auto;

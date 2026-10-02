@@ -19,6 +19,7 @@ import { newlyDelivered } from "../model/messages";
 import { newPlan, planSession } from "../model/plan";
 import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";
 import { newActionIds } from "../model/actions";
+import { checkFailedText, isBusy, latestText, mayAutoOpen, mayShowNote, reduceUpdate, type UpdateInfo } from "../model/update";
 import { cycle, pendingQueue, resolveFocus } from "../model/viewmodel";
 import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
@@ -43,12 +44,14 @@ const CUE_SOUNDS: Record<CueKind, string> = {
 const modeOrder = (m: IslandMode) => (m === "strip" ? 0 : m === "compact" ? 1 : 2);
 
 /** Views whose height follows their content (ViewHost.measure). */
-const MEASURED_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
+const MEASURED_VIEWS: IslandViewName[] = ["session", "interaction", "finished", "update"];
 /** Views the grip and the enlarge button can make taller. */
 const SIZABLE_VIEWS: IslandViewName[] = ["session", "interaction", "finished", "chat"];
 /** The chat stays open longer than the cards: people read and type in it. */
 const CHAT_CLOSE_MIN_S = 120;
 const CARD_CLOSE_MIN_S = 5;
+/** The short answer to a manual update check closes quickly. */
+const UPDATE_NOTE_S = 4;
 
 function screenSize(): Screen {
   const s = typeof window !== "undefined" ? window.screen : undefined;
@@ -91,6 +94,8 @@ export class Island {
   private resumeChat = false;
   /** The state the chat put in State.stateOverride, so only that one is ever cleared. */
   private chatApplied: BotStateName | null = null;
+  /** Same for the update install (working while it downloads, error face when it fails). */
+  private updateApplied: BotStateName | null = null;
   private greeting = new Greeting();
 
   private running = false;
@@ -205,6 +210,11 @@ export class Island {
           return error;
         },
       },
+      update: {
+        open: () => this.openUpdate(),
+        install: () => this.installUpdate(),
+        later: () => this.laterUpdate(),
+      },
       toggleRecent: () => {
         State.showRecent = !State.showRecent;
         Sound.play("blip");
@@ -221,7 +231,7 @@ export class Island {
     this.countdown = h("div", { id: "countdown" });
     this.grip = h("div", { id: "grip", title: "Drag to resize, double-click for the normal size" });
 
-    this.strip = buildStrip();
+    this.strip = buildStrip(actions);
     this.compact = buildCompact(actions);
     this.views = buildViews(actions);
     const viewsEl = h("div", { id: "views" });
@@ -290,6 +300,7 @@ export class Island {
     if (mode === "expanded") Sound.play("open");
     if (prev === "expanded") {
       Sound.play("close");
+      State.updateNote = null;
       this.resetSize();
       State.answerOpenFor = null;
       State.stepOpen = null;
@@ -310,6 +321,7 @@ export class Island {
     switch (State.view) {
       case "chat": return Math.max(CHAT_CLOSE_MIN_S, set);
       case "finished": return FINISH_CARD_S;
+      case "update": return State.updateNote ? UPDATE_NOTE_S : Math.max(CARD_CLOSE_MIN_S, set);
       case "plan":
       case "interaction": return Math.max(CARD_CLOSE_MIN_S, set);
       default: return set;
@@ -428,13 +440,14 @@ export class Island {
 
   /** Only the user's pin survives; an alert's pin ends when its card is gone. */
   private syncPin() {
-    State.isPinned = State.userPinned;
-    this.fsm.pinned = State.userPinned;
+    // An install in progress keeps its card open.
+    State.isPinned = State.userPinned || isBusy(State.update);
+    this.fsm.pinned = State.isPinned;
   }
 
   private togglePin() {
     State.userPinned = !State.userPinned;
-    State.isPinned = State.userPinned || State.view === "interaction";
+    State.isPinned = State.userPinned || State.view === "interaction" || isBusy(State.update);
     this.fsm.pinned = State.isPinned;
     if (!State.isPinned) this.rearmCollapse();
     State.notify();
@@ -579,6 +592,112 @@ export class Island {
     if (State.mode !== "expanded") this.fsm.forceHome();
     this.expand("plan");
     this.rearmCollapse();
+  }
+
+  /** The backend found a release: a pill always, the card only while the island is quiet. */
+  onUpdateAvailable(info: UpdateInfo) {
+    const first = State.update.info?.version !== info.version;
+    const before = State.update;
+    State.update = reduceUpdate(State.update, { type: "available", info });
+    State.notify();
+    if (State.update === before) return;
+    State.updateNote = null;
+    const quiet = !this.needsUser();
+    if (first && quiet) {
+      Sound.play("pop");
+      this.engine.triggerEmote("happy");
+    }
+    if (mayAutoOpen({ mode: State.mode, view: State.view, needsUser: this.needsUser() })) this.showUpdate();
+    else this.animateGeometry(false);
+  }
+
+  /** A manual check found nothing. */
+  onUpdateNone() {
+    this.showUpdateNote({ text: latestText(State.appVersion), tone: "ok" });
+  }
+
+  /** A failed check shows as a note; a failed install as the card's error with Retry. */
+  onUpdateError(message: string) {
+    // The install call and the event both report one failure.
+    if (State.update.phase === "error") return;
+    const installing = isBusy(State.update);
+    State.update = reduceUpdate(State.update, { type: "error", message });
+    Sound.play("error");
+    if (installing) {
+      this.syncPin();
+      this.showUpdate();
+    } else this.showUpdateNote({ text: checkFailedText(message), tone: "bad" });
+  }
+
+  onUpdateProgress(downloaded: number, total: number | null) {
+    State.update = reduceUpdate(State.update, { type: "progress", downloaded, total });
+    this.syncPin();
+    State.notify();
+  }
+
+  onUpdateReady() {
+    State.update = reduceUpdate(State.update, { type: "ready" });
+    State.updateNote = null;
+    this.syncPin();
+    State.notify();
+  }
+
+  private showUpdateNote(note: { text: string; tone: "ok" | "bad" }) {
+    if (isBusy(State.update) || !mayShowNote({ mode: State.mode, view: State.view, needsUser: this.needsUser() })) return;
+    State.updateNote = note;
+    if (note.tone === "ok") {
+      Sound.play("blip");
+      this.engine.triggerEmote("happy");
+    }
+    this.showUpdate();
+  }
+
+  /** Opens the update card like the plan card: never pinned (except during an install), so it closes on its own. */
+  private showUpdate() {
+    this.syncPin();
+    if (State.mode !== "expanded") this.fsm.forceHome();
+    this.expand("update");
+    this.rearmCollapse();
+  }
+
+  private openUpdate() {
+    if (!State.update.info) return;
+    State.updateNote = null;
+    Sound.play("blip");
+    this.showUpdate();
+  }
+
+  private installUpdate() {
+    const before = State.update;
+    State.update = reduceUpdate(State.update, { type: "install" });
+    if (State.update === before) return;
+    State.updateNote = null;
+    Sound.play("approve");
+    this.syncPin();
+    State.notify();
+    void Bridge.updateInstall().then((error) => {
+      if (error) this.onUpdateError(error);
+    });
+  }
+
+  private laterUpdate() {
+    State.update = reduceUpdate(State.update, { type: "later" });
+    Sound.play("blip");
+    if (State.mode === "expanded" && State.view === "update") this.collapse();
+    State.notify();
+  }
+
+  /** While an install runs Buddy works; after a failed one he shows the error face. */
+  private syncUpdateBuddy() {
+    const u = State.update;
+    let want: BotStateName | null = null;
+    if (!this.needsUser() && State.stateOverride === this.updateApplied) {
+      if (u.phase === "downloading" || u.phase === "installing") want = "working";
+      else if (u.phase === "error" && State.mode === "expanded" && State.view === "update") want = "error";
+    }
+    if (want === this.updateApplied) return;
+    if (State.stateOverride === this.updateApplied) State.stateOverride = want;
+    this.updateApplied = want;
   }
 
   private async focusTerminal(sessionId: string) {
@@ -1159,6 +1278,7 @@ export class Island {
       }
     }
     this.syncChatBuddy();
+    this.syncUpdateBuddy();
     const big = this.sizable() && State.manualH != null;
     this.islandEl.classList.toggle("big", big);
     this.grip.classList.toggle("on", this.sizable() && !greetingActive);

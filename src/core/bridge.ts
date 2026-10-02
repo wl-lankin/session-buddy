@@ -7,7 +7,9 @@ import { listen } from "@tauri-apps/api/event";
 import type { Settings } from "./state";
 import type { Snapshot } from "./types";
 import type { ChatEvent, ChatStatus } from "../model/chat";
+import type { CheckResult } from "../model/update";
 import { fakeChat, fakeChatListen } from "./chatfake";
+import { fakeUpdateListen } from "./updatefake";
 
 export const IS_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -98,6 +100,10 @@ export const Bridge = {
   /** Brings the session's terminal app to the front (macOS). Resolves to an error message, or null. */
   focusTerminal: (sessionId: string) => errorCall("focus_terminal", { sessionId }),
   workerStop: (sessionId: string) => errorCall("worker_stop", { sessionId }),
+  /** A manual check (it also emits the update events). */
+  updateCheck: () => attempt<CheckResult>("update_check"),
+  /** Resolves to an error message, or null; on success the app restarts, so it may never resolve. */
+  updateInstall: () => errorCall("update_install", {}),
   chatSend: (text: string) => attempt<void>("chat_send", { text }),
   chatWake: () => call<void>("chat_wake"),
   chatInterrupt: () => call<void>("chat_interrupt"),
@@ -110,6 +116,7 @@ export const Bridge = {
 export async function onEvent<T>(name: string, handler: (payload: T) => void) {
   if (!IS_TAURI) {
     if (name === "chat-event") fakeChatListen(handler as (e: ChatEvent) => void);
+    else if (name.startsWith("update-")) fakeUpdateListen(name, handler as (p: unknown) => void);
     return;
   }
   await listen<T>(name, (e) => handler(e.payload));

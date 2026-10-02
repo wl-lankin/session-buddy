@@ -1,6 +1,7 @@
 // Renders the island in one fixed state for the README screenshots
 // (scripts/screenshots.mjs). Pick it with ?state=strip|compact|expanded|approval|
-// question|reply|plan|plan-answer|finished|finished-merged|chat|chat-empty|chat-off. Made-up demo data only. Nothing
+// question|reply|plan|plan-answer|finished|finished-merged|chat|chat-empty|chat-off|
+// update|update-progress|update-installing|update-error|update-note|update-pill-strip|update-pill-compact. Made-up demo data only. Nothing
 // here cycles: the page drives the island once, waits for it to settle and sets
 // document.body.dataset.ready = "1".
 
@@ -9,7 +10,15 @@ import { State } from "../src/core/state";
 import type { Interaction, Session, Snapshot, Usage } from "../src/core/types";
 import { Island } from "../src/island/island";
 import { fakeChatListen } from "../src/core/chatfake";
+import { reduceUpdate, type UpdateInfo } from "../src/model/update";
 import { demoChat } from "./fixtures";
+
+const RELEASE: UpdateInfo = {
+  version: "1.0.11",
+  currentVersion: "1.0.10",
+  notes: "## What is new\n\n- The update notice on the island\n- **Install and restart** in one click\n- Faster startup\n- Fixes a flicker in the compact card\n- Quieter sounds\n\nSee [all changes](https://github.com/example/session-buddy/releases).",
+};
+const MB = 1024 * 1024;
 
 // Mochi's blinks and particles use Math.random: seed it so every run draws the same face.
 let seed = 7;
@@ -143,6 +152,7 @@ async function run() {
   // Mochi looks down towards the content instead of at the top-left corner.
   State.mouse = { x: 300, y: 260 };
 
+  State.appVersion = "1.0.10";
   const state = new URLSearchParams(location.search).get("state") ?? "expanded";
   const list = sessions();
   switch (state) {
@@ -182,6 +192,33 @@ async function run() {
     case "plan":
       island.onSnapshot(snap(list));
       island.onSnapshot(snap(withSession(list, "shop", { plan: PLAN })));
+      break;
+    case "update-pill-strip":
+    case "update-pill-compact":
+      island.onSnapshot(snap(list));
+      State.update = reduceUpdate(State.update, { type: "available", info: RELEASE });
+      State.notify();
+      if (state === "update-pill-compact") island.fsm.reveal();
+      break;
+    case "update":
+    case "update-progress":
+    case "update-installing":
+    case "update-error":
+      island.onSnapshot(snap(list));
+      island.onUpdateAvailable(RELEASE);
+      if (state !== "update") {
+        State.update = reduceUpdate(State.update, { type: "install" });
+        island.onUpdateProgress(state === "update-installing" ? 12 * MB : 4.2 * MB, 12 * MB);
+      }
+      if (state === "update-error") island.onUpdateError("The download was interrupted");
+      island.onCursor(560, 120);
+      State.mouse = { x: 300, y: 260 };
+      break;
+    case "update-note":
+      island.onSnapshot(snap(list));
+      island.onUpdateNone();
+      island.onCursor(560, 120);
+      State.mouse = { x: 300, y: 260 };
       break;
     case "finished":
     case "finished-merged": {

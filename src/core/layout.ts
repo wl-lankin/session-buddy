@@ -3,7 +3,7 @@
 // island is drawn inside it, glued to the top edge and horizontally centred.
 
 export type IslandMode = "strip" | "compact" | "expanded";
-export type IslandViewName = "session" | "interaction" | "plan" | "finished" | "empty" | "confused" | "greeting" | "chat";
+export type IslandViewName = "session" | "interaction" | "plan" | "finished" | "empty" | "confused" | "greeting" | "chat" | "update";
 
 export type BotStateName =
   | "idle" | "working" | "thinking" | "searching" | "approval" | "question"
@@ -43,6 +43,7 @@ const VIEW_HEIGHTS: Record<IslandViewName, number> = {
   confused: 160,
   greeting: 150,
   chat: 440,
+  update: 150,
 };
 
 /** The session view without its unfolded last answer. */
@@ -53,6 +54,7 @@ const MEASURED: Partial<Record<IslandViewName, [number, number]>> = {
   session: [VIEW_HEIGHTS.session, 600],
   interaction: [200, CARD_MAX_H],
   finished: [VIEW_HEIGHTS.finished, CARD_MAX_H],
+  update: [VIEW_HEIGHTS.update, CARD_MAX_H],
 };
 
 /** Natural island size. `measured` is the view's content height, `expandedWidth` the auto width (src/model/size.ts). */

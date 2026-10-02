@@ -49,6 +49,8 @@ pub struct Settings {
     pub chat_session_host: String,
     /// A plan from plan mode can be rejected with feedback on the island; off keeps it read-only.
     pub plan_from_island: bool,
+    /// Look for a newer release now and then; installing always waits for a click.
+    pub update_check: bool,
 }
 
 pub const MAX_WORKERS: u32 = 6;
@@ -100,6 +102,7 @@ impl Default for Settings {
             chat_max_workers: 3,
             chat_session_host: "background".into(),
             plan_from_island: true,
+            update_check: true,
         }
     }
 }
@@ -176,6 +179,16 @@ mod tests {
         assert!(!off.plan_from_island);
         assert_eq!(serde_json::to_value(Settings::default()).unwrap()["planFromIsland"], true);
         assert_eq!(serde_json::to_value(off).unwrap()["planFromIsland"], false);
+    }
+
+    #[test]
+    fn older_files_get_update_check_on() {
+        let s: Settings = serde_json::from_str(r#"{"soundEnabled": false}"#).unwrap();
+        assert!(s.update_check);
+        let off: Settings = serde_json::from_str(r#"{"updateCheck": false}"#).unwrap();
+        assert!(!off.update_check);
+        assert_eq!(serde_json::to_value(Settings::default()).unwrap()["updateCheck"], true);
+        assert_eq!(serde_json::to_value(off).unwrap()["updateCheck"], false);
     }
 
     #[test]

@@ -3,15 +3,18 @@
 import { h, clear } from "./dom";
 import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
+import { pillText } from "../model/update";
 import { limitParts, recentClass, stripLabel, summarize } from "../model/viewmodel";
-import type { ViewHost } from "./views";
+import { updatePill } from "./parts";
+import type { ViewActions, ViewHost } from "./views";
 
-export function buildStrip(): ViewHost {
+export function buildStrip(actions: ViewActions): ViewHost {
   const label = h("span", { class: "strip-label" });
   const dots = h("span", { class: "strip-dots" });
   const limits = h("span", { class: "strip-limits" });
+  const pill = updatePill(() => actions.update.open());
   // The wrapper only matters beside a notch, where dots and limits share the right wing.
-  const el = h("div", { class: "layer strip" }, label, h("span", { class: "strip-right" }, dots, limits));
+  const el = h("div", { class: "layer strip" }, label, h("span", { class: "strip-right" }, dots, pill.el, limits));
   let dotsKey = "";
   return {
     el,
@@ -24,10 +27,10 @@ export function buildStrip(): ViewHost {
         // Two equal wings around the notch, so the notch stays centred: the wider one decides.
         const notch = parseFloat(cs.getPropertyValue("--notch-w")) || 0;
         const left = parseFloat(cs.paddingLeft) + label.scrollWidth;
-        const right = dots.scrollWidth + gap + limits.scrollWidth + parseFloat(cs.paddingRight);
+        const right = dots.scrollWidth + gap + (pill.shown() ? pill.el.scrollWidth + gap : 0) + limits.scrollWidth + parseFloat(cs.paddingRight);
         return 2 * Math.max(left, right) + notch + 16 + 1;
       }
-      return pad + label.scrollWidth + dots.scrollWidth + limits.scrollWidth + 2 * gap + 1;
+      return pad + label.scrollWidth + dots.scrollWidth + limits.scrollWidth + (pill.shown() ? pill.el.scrollWidth + 3 * gap : 2 * gap) + 1;
     },
     sync() {
       // Only live sessions get a dot (the strip never shows the recent ones).
@@ -41,6 +44,7 @@ export function buildStrip(): ViewHost {
           dots.append(h("i", { class: `sdot ${s.status}${recentClass(s)}`, style: `--c:${colorForProject(s.project)}`, title: s.project }));
         }
       }
+      pill.set(pillText(State.update));
       const parts = limitParts(State.snapshot.usage);
       const limitsKey = parts.map((p) => `${p.text}:${p.level}`).join("|");
       if (limits.dataset.key !== limitsKey) {

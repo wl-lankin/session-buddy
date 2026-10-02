@@ -3337,14 +3337,14 @@ dependencies = [
 
 [[package]]
 name = "sb-common"
-version = "1.0.11"
+version = "1.0.12"
 dependencies = [
  "windows 0.61.3",
 ]
 
 [[package]]
 name = "sb-core"
-version = "1.0.11"
+version = "1.0.12"
 dependencies = [
  "chrono",
  "serde",
@@ -3355,7 +3355,7 @@ dependencies = [
 
 [[package]]
 name = "sb-relay"
-version = "1.0.11"
+version = "1.0.12"
 dependencies = [
  "libc",
  "sb-common",
@@ -3655,7 +3655,7 @@ dependencies = [
 
 [[package]]
 name = "session-buddy"
-version = "1.0.11"
+version = "1.0.12"
 dependencies = [
  "chrono",
  "libc",

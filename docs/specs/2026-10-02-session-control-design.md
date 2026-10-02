@@ -40,7 +40,7 @@ Tools (names as the model sees them: `mcp__buddy__<name>`):
 The chat can never answer a permission request or a question of a session: that stays with the user. No tool for it.
 
 Safety rules the app enforces, not the model:
-- `project` is a folder name or path that resolves, after canonicalisation (symlinks resolved), to a folder inside one of `chatProjectRoots` (direct children or deeper). Everything else is refused with the list of allowed roots.
+- `project` (what the model asks for) is a folder name or path that resolves, after canonicalisation (symlinks resolved), to a folder inside one of `chatProjectRoots` (direct children or deeper). Everything else is refused with the list of allowed roots. Only a folder the user chose in the dialog on the card may lie elsewhere; it must exist and be a directory.
 - `model` must be one of the fixed set; `prompt` and `text` at most 4000 characters, no control characters except newlines.
 - The confirmation shows the full prompt, the resolved folder and the model. The tool call waits for the answer (like a permission request, up to 110 s) and returns "denied by the user" or the result.
 - Tool results are data, clipped; an error text never contains a path outside the roots.
@@ -77,7 +77,12 @@ The island opens on it like on an approval (pinned until answered, Buddy in the 
 
 Chat section, "Control": folders the chat may start sessions in (add / remove, validated: must exist and be a directory), max parallel background sessions, and the default place sessions run in (`chatSessionHost`: `background` (default), `terminal` (Terminal.app), `iterm`, `warp`, `wt` on Windows; only the ones that exist on this machine are offered). Everything else about control lives in the chat header.
 
-The confirmation card shows "Runs in" with the default and lets the user change it for this one start before pressing Allow; the same goes for the project folder: when the name is ambiguous the card lists the matching folders to choose from. Terminal hosts are phase 2; until then the choice shows only "Background".
+The folder is the user's call. Two ways to choose it, both with the native folder dialog (Tauri dialog plugin, add its capability; the dialog is opened by the island, never by the model):
+
+- In Settings the "Add folder" button picks the project roots the chat may suggest folders from.
+- On the confirmation card the "Folder" row has a "Choose..." button. A folder the user picks there themselves is trusted even outside the roots: the rule "inside a root" only restricts what the MODEL asks for. When the model's project name matches several folders the card lists them as options too.
+
+The card also shows "Runs in" with the default host and lets the user change it for this one start before pressing Allow. Terminal hosts are phase 2; until then the choice shows only "Background".
 
 ## Phase 2: terminal sessions
 

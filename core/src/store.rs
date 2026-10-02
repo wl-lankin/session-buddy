@@ -11,6 +11,8 @@ use crate::adopt::{match_processes, Candidate, ClaudeProcess};
 use crate::steps::{approval_target, clip, output_tail, project_name, step_detail, step_label, StepDetail};
 
 pub const MAX_STEPS: usize = 50;
+/// Claude's last message, kept whole enough to read on the reply card (the relay caps it at the same size).
+const MAX_MESSAGE: usize = 12_000;
 pub const FINISHED_TO_IDLE_MS: i64 = 30_000;
 pub const DEFAULT_STALE_AFTER_MS: i64 = 10 * 60_000;
 pub const DEFAULT_REMOVE_AFTER_MS: i64 = 2 * 60 * 60_000;
@@ -662,7 +664,7 @@ impl Store {
                 sess.plan = None;
                 sess.close_open_steps();
                 if let Some(m) = s(p, "last_assistant_message") {
-                    sess.last_message = Some(clip(m, 2_000));
+                    sess.last_message = Some(clip(m, MAX_MESSAGE));
                 }
                 sess.update_background(p);
                 // The payload lists what still runs: a running agent missing from it has ended.
@@ -1030,6 +1032,17 @@ mod tests {
         let cues = st.apply_hook(&ev("PermissionRequest", json!({"tool_name": "Bash"})), T0);
         assert!(cues.is_empty());
         assert!(sess(&st).pending.is_empty());
+    }
+
+    #[test]
+    fn a_long_reply_reaches_the_card_whole() {
+        let mut st = Store::default();
+        let long = format!("{}Shall I push?", "A long answer. ".repeat(500));
+        assert!(long.chars().count() > 2_000 && long.chars().count() < MAX_MESSAGE);
+        st.apply_hook(&ev("Stop", json!({"last_assistant_message": long.clone(), "sb_request_id": "p1", "sb_wait_ms": 540_000})), T0);
+        let s = sess(&st);
+        assert!(matches!(&s.pending[0], Interaction::Reply { message, .. } if *message == long));
+        assert_eq!(s.last_message.as_deref(), Some(long.as_str()));
     }
 
     #[test]

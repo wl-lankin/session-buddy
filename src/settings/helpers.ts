@@ -7,3 +7,8 @@ export function normalizeNumber(raw: number | string, min: number, max: number, 
   if (integer) v = Math.round(v);
   return Math.min(max, Math.max(min, v));
 }
+
+/** The unit shown next to a seconds field: 0 means "do it at once". */
+export function secondsLabel(value: number): string {
+  return value === 0 ? "Immediately" : "seconds";
+}

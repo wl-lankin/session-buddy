@@ -2,9 +2,10 @@
 
 Each release workflow run copies the section of its version into the release text, and the app's update card shows it. Keep the headings as `## <version> - <title>` and write a few plain lines per release: what a user sees, not how it was built.
 
-## 1.0.12 - Release notes in the update card
-- The update card now shows what changed in the new version.
-- Release notes come from this file.
+## 1.0.12 - Release notes in the update card, Ollama switch
+- The update card now shows what changed in the new version. Release notes come from this file.
+- Ollama is a switch in Settings and off by default: without it the chat's model menu shows only Claude and nothing tries to reach an Ollama server. Whoever already chose a local model keeps it on.
+- The chat button in the tab row is a compact square.
 
 ## 1.0.11 - Updates from GitHub Releases
 - The app checks for a newer version (shortly after start, then every 6 hours) and shows an "Update" pill on the island.

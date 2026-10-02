@@ -46,6 +46,18 @@ export function autoWidth(needed: number[], screen: Screen): number {
 }
 
 /** The account column: wide enough for the email on one line, within its bounds. */
+/** The strip's middle column is the notch plus this much air (the CSS `calc(var(--notch-w) + 16px)`). */
+export const NOTCH_MIDDLE_PAD = 16;
+
+/**
+ * Width of the strip beside a notch: three grid columns (wing, notch, wing) with two gaps, inside the
+ * strip's own padding. Both wings are as wide as the wider content so the notch stays centred.
+ * `label` and `right` are the natural widths of the two wings' content, without any padding.
+ */
+export function notchStripWidth(o: { padLeft: number; padRight: number; label: number; right: number; notch: number; gap: number }): number {
+  return o.padLeft + o.padRight + 2 * Math.max(o.label, o.right) + o.notch + NOTCH_MIDDLE_PAD + 2 * o.gap + 1;
+}
+
 export function accountWidth(content: number): number {
   return Math.ceil(clamp(content, ACCOUNT_MIN_W, ACCOUNT_MAX_W));
 }

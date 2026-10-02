@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountWidth, autoWidth, clampHeight, IDLE_RESET_MS, largeHeight, maxHeight, panelFor, shouldResetSize } from "./size";
+import { accountWidth, autoWidth, clampHeight, IDLE_RESET_MS, largeHeight, maxHeight, notchStripWidth, panelFor, shouldResetSize } from "./size";
 
 const FHD = { w: 1920, h: 1080 };
 const SMALL = { w: 1280, h: 600 };
@@ -86,5 +86,21 @@ describe("shouldResetSize", () => {
   it("resets after two minutes without the pointer on the island", () => {
     expect(shouldResetSize({ ...base, nowMs: 1_000 + IDLE_RESET_MS - 1 })).toBe(false);
     expect(shouldResetSize({ ...base, nowMs: 1_000 + IDLE_RESET_MS })).toBe(true);
+  });
+});
+
+describe("notchStripWidth", () => {
+  const base = { padLeft: 38, padRight: 14, label: 85, right: 150, notch: 185, gap: 8 };
+
+  it("adds the padding, both wings of the wider content, the notch column and the two gaps", () => {
+    expect(notchStripWidth(base)).toBe(38 + 14 + 300 + 185 + 16 + 16 + 1);
+  });
+
+  it("the wider wing decides, whichever side it is", () => {
+    expect(notchStripWidth({ ...base, label: 200, right: 150 })).toBe(notchStripWidth({ ...base, label: 150, right: 200 }));
+  });
+
+  it("does not depend on the strip's current width: the same content gives the same answer", () => {
+    expect(notchStripWidth(base)).toBe(notchStripWidth({ ...base }));
   });
 });

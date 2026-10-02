@@ -3,6 +3,7 @@
 import { h, clear } from "./dom";
 import { colorForProject } from "../core/layout";
 import { State } from "../core/state";
+import { notchStripWidth } from "../model/size";
 import { pillText } from "../model/update";
 import { limitParts, recentClass, stripLabel, summarize } from "../model/viewmodel";
 import { updatePill } from "./parts";
@@ -25,10 +26,14 @@ export function buildStrip(actions: ViewActions): ViewHost {
       const gap = parseFloat(cs.columnGap) || 0;
       if (document.documentElement.classList.contains("notched")) {
         // Two equal wings around the notch, so the notch stays centred: the wider one decides.
-        const notch = parseFloat(cs.getPropertyValue("--notch-w")) || 0;
-        const left = parseFloat(cs.paddingLeft) + label.scrollWidth;
-        const right = dots.scrollWidth + gap + (pill.shown() ? pill.el.scrollWidth + gap : 0) + limits.scrollWidth + parseFloat(cs.paddingRight);
-        return 2 * Math.max(left, right) + notch + 16 + 1;
+        return notchStripWidth({
+          padLeft: parseFloat(cs.paddingLeft),
+          padRight: parseFloat(cs.paddingRight),
+          label: label.scrollWidth,
+          right: dots.scrollWidth + gap + (pill.shown() ? pill.el.scrollWidth + gap : 0) + limits.scrollWidth,
+          notch: parseFloat(cs.getPropertyValue("--notch-w")) || 0,
+          gap,
+        });
       }
       return pad + label.scrollWidth + dots.scrollWidth + limits.scrollWidth + (pill.shown() ? pill.el.scrollWidth + 3 * gap : 2 * gap) + 1;
     },

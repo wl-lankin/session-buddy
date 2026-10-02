@@ -136,3 +136,5 @@ button.quit:hover { background: rgba(244, 80, 94, 0.14); border-color: rgba(244,
 .root.none { color: var(--dim-3); font-size: 12px; }
 .root-x { flex: 0 0 auto; align-self: center; width: 22px; height: 22px; padding: 0; border-color: transparent; background: transparent; color: var(--dim-2); font-size: 15px; line-height: 1; }
 .root-x:hover { background: rgba(244, 80, 94, 0.14); border-color: transparent; color: #ff8d97; }
+
+.load-error { margin: 24px; padding: 14px 16px; border-radius: 10px; background: rgba(244, 80, 94, 0.12); color: var(--red-text, #ff8d97); font: 13px/1.5 var(--font); }

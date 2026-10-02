@@ -269,22 +269,32 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Builds on its own thread: on Windows, building a window on the main thread (the tray menu handler,
+/// a synchronous command) deadlocks and leaves the settings window blank white.
 pub fn show_settings_window(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || open_settings(&app));
+}
+
+fn open_settings(app: &AppHandle) {
     let _ = app.run_on_main_thread(island::activate_app);
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.show();
         let _ = w.set_focus();
         return;
     }
-    if let Ok(w) = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    match WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Session Buddy settings")
         .inner_size(600.0, 680.0)
         .resizable(true)
         .focused(true)
         .build()
     {
-        no_browser_keys(&w);
-        let _ = w.set_focus();
+        Ok(w) => {
+            no_browser_keys(&w);
+            let _ = w.set_focus();
+        }
+        Err(err) => log::line(format!("settings window: {err}")),
     }
 }
 

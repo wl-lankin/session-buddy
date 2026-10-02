@@ -16,7 +16,7 @@ import type { SettingsEvent } from "./reactions";
 // ?demo=1 in a plain browser: a fake boot result for the README screenshots.
 const DEMO = !IS_TAURI && new URLSearchParams(location.search).get("demo") === "1";
 // &ollama=down|empty picks the fake Ollama server's answer for the Test button.
-const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true }, version: "1.0.4" };
+const DEMO_BOOT: BootInfo = { settings: { ...DEFAULT_SETTINGS, chatEnabled: true }, version: "1.0.5" };
 const DEMO_STATUS: InstallStatus = {
   hooksInstalled: true,
   statusLineInstalled: true,

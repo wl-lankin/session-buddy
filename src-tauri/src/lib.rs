@@ -1,6 +1,7 @@
 //! session-buddy: shows and answers every running Claude Code session.
 
 mod autostart;
+mod chat;
 mod install;
 mod ipc;
 mod island;
@@ -82,9 +83,9 @@ fn snapshot(shared: State<Shared>) -> Snapshot {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
-    let (screen_changed, autostart_changed, hotkey_changed) = {
+    let (screen_changed, autostart_changed, hotkey_changed, chat_turned_off) = {
         let mut current = shared.settings.lock().unwrap();
-        let changed = (current.screen != settings.screen, current.autostart != settings.autostart, current.hotkey != settings.hotkey);
+        let changed = (current.screen != settings.screen, current.autostart != settings.autostart, current.hotkey != settings.hotkey, current.chat_enabled && !settings.chat_enabled);
         *current = settings.clone();
         changed
     };
@@ -104,6 +105,9 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     }
     if hotkey_changed {
         register_hotkey(&app, &settings.hotkey);
+    }
+    if chat_turned_off {
+        chat::stop(&app);
     }
     mark_dirty();
     let _ = app.emit("settings-changed", settings);
@@ -195,6 +199,7 @@ fn quit_app(app: AppHandle) {
 }
 
 pub fn show_settings_window(app: &AppHandle) {
+    let _ = app.run_on_main_thread(island::activate_app);
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.show();
         let _ = w.set_focus();
@@ -204,9 +209,11 @@ pub fn show_settings_window(app: &AppHandle) {
         .title("Session Buddy settings")
         .inner_size(600.0, 680.0)
         .resizable(true)
+        .focused(true)
         .build()
     {
         no_browser_keys(&w);
+        let _ = w.set_focus();
     }
 }
 
@@ -381,9 +388,11 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(shared)
+        .manage(chat::Chat::default())
         .invoke_handler(tauri::generate_handler![
             boot, snapshot, save_settings, set_island_rect, focus_window, reposition, set_panel_size, reset_panel_size, ack, answer, release,
-            install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app
+            install_status, install_preview, install_write, open_settings_window, log, open_link, quit_app, chat::chat_send, chat::chat_wake, chat::chat_interrupt,
+            chat::chat_reset, chat::chat_status
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -412,6 +421,11 @@ pub fn run() {
             register_hotkey(&handle, &hotkey);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running session-buddy");
+        .build(tauri::generate_context!())
+        .expect("error while building session-buddy")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                chat::stop(app);
+            }
+        });
 }

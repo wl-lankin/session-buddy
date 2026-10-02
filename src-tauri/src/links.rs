@@ -1,10 +1,24 @@
-//! Opens the two links in the settings footer in the default browser. Only
-//! these exact URLs are accepted: the web views can never open anything else.
+//! Opens a link in the default browser: the settings footer links and plain
+//! http(s) addresses (from the chat). Nothing else, and never through a shell.
 
 pub const LINKS: [&str; 2] = ["https://wolfgang-linz.de", "https://github.com/Louis-CFM/coucou"];
 
+const MAX_URL_LEN: usize = 2048;
+
+/// A plain web address: no whitespace or control characters, a real host, and no
+/// user info before the host ("https://bank.com@evil.test" hides where it goes).
+fn is_web_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")) else { return false };
+    if url.len() > MAX_URL_LEN || url.chars().any(|c| c.is_control() || c.is_whitespace() || "\"<>\\^`{|}".contains(c)) {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once(':').filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit())).map_or(authority, |(h, _)| h);
+    !host.is_empty() && host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+}
+
 pub fn allowed(url: &str) -> bool {
-    LINKS.contains(&url)
+    LINKS.contains(&url) || is_web_url(url)
 }
 
 pub fn open(url: &str) -> Result<(), String> {
@@ -48,13 +62,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_two_footer_links_are_allowed() {
+    fn plain_web_addresses_and_the_footer_links_are_allowed() {
         assert!(allowed("https://wolfgang-linz.de"));
         assert!(allowed("https://github.com/Louis-CFM/coucou"));
-        assert!(!allowed("https://wolfgang-linz.de/"));
-        assert!(!allowed("https://github.com/Louis-CFM/coucou/../../evil"));
-        assert!(!allowed("file:///C:/Windows/System32/calc.exe"));
-        assert!(!allowed(""));
-        assert!(open("https://example.com").is_err());
+        assert!(allowed("https://www.wetter.de/deutschland/muenchen?x=1#top"));
+        assert!(allowed("http://example.com:8080/a"));
+    }
+
+    #[test]
+    fn everything_else_is_refused() {
+        for url in [
+            "",
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "-a Calculator",
+            "https://",
+            "https://localhost",
+            "https://bank.com@evil.test/login",
+            "https://example.com/a b",
+            "https://example.com/\"x\"",
+            "ftp://example.com",
+        ] {
+            assert!(!allowed(url), "{url}");
+        }
+        assert!(!allowed(&format!("https://example.com/{}", "a".repeat(2100))));
+        assert!(open("file:///etc/passwd").is_err());
     }
 }

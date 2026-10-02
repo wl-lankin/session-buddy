@@ -25,6 +25,13 @@ pub struct Settings {
     pub finish_style: String,
     /// The finished card only shows for turns at least this long, seconds; shorter ones get the sound and a short emote.
     pub finish_min_seconds: f64,
+    /// Buddy Chat: a headless Claude Code runs only while this is on.
+    pub chat_enabled: bool,
+    /// The chat process stops after this many idle minutes, 0 = never.
+    pub chat_idle_minutes: u32,
+    pub chat_model: String,
+    /// Empty = look for the `claude` CLI in the usual places.
+    pub chat_claude_path: String,
 }
 
 impl Default for Settings {
@@ -42,6 +49,10 @@ impl Default for Settings {
             context_sound: true,
             finish_style: "card".into(),
             finish_min_seconds: 60.0,
+            chat_enabled: false,
+            chat_idle_minutes: 10,
+            chat_model: "haiku".into(),
+            chat_claude_path: String::new(),
         }
     }
 }
@@ -73,5 +84,18 @@ mod tests {
         let v = serde_json::to_value(Settings { finish_style: "off".into(), ..Settings::default() }).unwrap();
         assert_eq!(v["finishStyle"], "off");
         assert_eq!(v["finishMinSeconds"], 60.0);
+    }
+
+    #[test]
+    fn older_files_get_the_chat_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"soundEnabled": false}"#).unwrap();
+        assert!(!s.chat_enabled);
+        assert_eq!(s.chat_idle_minutes, 10);
+        assert_eq!(s.chat_model, "haiku");
+        assert_eq!(s.chat_claude_path, "");
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["chatEnabled"], false);
+        assert_eq!(v["chatIdleMinutes"], 10);
+        assert_eq!(v["chatClaudePath"], "");
     }
 }

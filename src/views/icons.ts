@@ -7,6 +7,10 @@ export const ICONS = {
   house: "M12 3.2 2.8 10.6V21h6.6v-5.4h5.2V21h6.6V10.6L12 3.2z",
   // bubble.left.fill
   bubble: "M12 3.6c-5 0-9 3.3-9 7.4 0 2.3 1.3 4.4 3.3 5.7-.2 1.2-.8 2.4-1.7 3.4 1.9-.2 3.6-.9 4.9-1.9 .8.2 1.6.3 2.5.3 5 0 9-3.3 9-7.5s-4-7.4-9-7.4z",
+  // stop.fill (rounded square)
+  stop: "M8.2 6.5h7.6a1.7 1.7 0 0 1 1.7 1.7v7.6a1.7 1.7 0 0 1-1.7 1.7H8.2a1.7 1.7 0 0 1-1.7-1.7V8.2a1.7 1.7 0 0 1 1.7-1.7z",
+  // arrow.down
+  arrowDown: "M12 19.5 5.5 13l1.5-1.5 4 4V5.5h2v10l4-4 1.5 1.5L12 19.5z",
   // plus
   plus: "M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7V4z",
   // gearshape
@@ -20,6 +24,7 @@ export const ICONS = {
   arrowUpRight: "M8.5 7h8.5v8.5h-2V10.4l-7.1 7.1-1.4-1.4 7.1-7.1H8.5V7z",
   // chevron.right
   chevronRight: "M9 5.5 15.5 12 9 18.5",
+  pin: "M9 3.8h6M10.2 3.8v6.1L7 14.6h10l-3.2-4.7V3.8M12 14.6v5.8",
   chevronUp: "M5.5 15 12 8.5 18.5 15",
   chevronLeft: "M15 5.5 8.5 12 15 18.5",
   // checkmark

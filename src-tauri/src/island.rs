@@ -178,6 +178,12 @@ fn screen_key(app: &AppHandle) -> Option<(i32, i32, u32, u32, u64)> {
     Some((p.x, p.y, s.width, s.height, m.scale_factor().to_bits()))
 }
 
+/// Brings the app to the front (macOS); a no-op elsewhere.
+pub fn activate_app() {
+    #[cfg(target_os = "macos")]
+    macos::activate_app();
+}
+
 /// Clicking the island must never steal focus from the terminal.
 pub fn prepare(win: &WebviewWindow) {
     #[cfg(windows)]
@@ -349,6 +355,15 @@ mod macos {
                 return (width > 0.0).then_some(Notch { top: insets.top, width });
             }
             None
+        }
+    }
+
+    /// An Accessory app is never active, so a window it opens would stay behind the others.
+    pub fn activate_app() {
+        // SAFETY: plain AppKit call, made on the main thread by the caller.
+        unsafe {
+            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![app, activateIgnoringOtherApps: true];
         }
     }
 

@@ -70,6 +70,23 @@ export function enlargeButton(onToggle: () => void): { el: HTMLButtonElement; re
   return { el, refresh };
 }
 
+/** The pin toggle: keeps the island open. Filled while pinned. */
+export function pinButton(onToggle: () => void): { el: HTMLButtonElement; refresh(): void } {
+  const el = h("button", {
+    class: "enlarge pin",
+    onclick: (e: Event) => {
+      e.stopPropagation();
+      onToggle();
+    },
+  }, svg(ICONS.pin, 14, { stroke: 1.8 }));
+  const refresh = () => {
+    el.classList.toggle("on", State.userPinned);
+    el.title = State.userPinned ? "Unpin: let the island close on its own" : "Pin: keep the island open";
+  };
+  refresh();
+  return { el, refresh };
+}
+
 /** Natural width of a row of shrinking items: what its children take now plus what their ellipsis leaves hide. */
 export function rowNatural(row: HTMLElement, leaves: string): number {
   const kids = [...row.children] as HTMLElement[];

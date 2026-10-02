@@ -33,7 +33,15 @@ fn send_within(line: String, wait: bool, budget: Duration) -> Option<String> {
     rx.recv_timeout(budget).ok().flatten()
 }
 
+/// The chat's own headless Claude Code sets SB_CHAT: its hooks must not make it a session in the island.
+fn muted(var: Option<std::ffi::OsString>) -> bool {
+    var.is_some_and(|v| !v.is_empty())
+}
+
 fn hook(arg_event: &str) {
+    if muted(std::env::var_os("SB_CHAT")) {
+        return;
+    }
     let raw = read_stdin();
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     let term = std::env::var("TERM_PROGRAM").unwrap_or_default();
@@ -103,4 +111,16 @@ fn main() {
         _ => {}
     }
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::muted;
+
+    #[test]
+    fn sb_chat_mutes_the_hook() {
+        assert!(muted(Some("1".into())));
+        assert!(!muted(None));
+        assert!(!muted(Some("".into())));
+    }
 }

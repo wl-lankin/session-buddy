@@ -6,11 +6,12 @@ import { installNoBrowser } from "./core/nobrowser";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import type { Cue, Snapshot } from "./core/types";
+import type { ChatAction, ChatEvent } from "./model/chat";
 import { Island } from "./island/island";
 
 declare global {
   interface Window {
-    __sb?: { snapshot(s: Snapshot): void; cues(c: Cue[]): void };
+    __sb?: { snapshot(s: Snapshot): void; cues(c: Cue[]): void; chat(a: ChatAction): void };
   }
 }
 
@@ -30,6 +31,7 @@ async function main() {
   await onEvent<string>("tray", (what) => {
     if (what === "open") island.open();
   });
+  await onEvent<ChatEvent>("chat-event", (e) => island.onChatEvent(e));
   await onEvent<null>("hotkey", () => island.toggleFromHotkey());
   await onEvent<null>("screen-changed", () => void Bridge.reposition());
   // MacBook notch: the window starts at the top of the screen, the island hangs
@@ -53,7 +55,7 @@ async function main() {
 
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
-    window.__sb = { snapshot: (s) => island.onSnapshot(s), cues: (c) => island.onCues(c) };
+    window.__sb = { snapshot: (s) => island.onSnapshot(s), cues: (c) => island.onCues(c), chat: (a) => island.chatDispatch(a) };
   }
 }
 

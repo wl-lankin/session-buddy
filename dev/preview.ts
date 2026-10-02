@@ -6,7 +6,8 @@
 // only flash and never cover them.
 
 import type { Snapshot } from "../src/core/types";
-import { demoSnapshot, demoUsage } from "./fixtures";
+import { State } from "../src/core/state";
+import { demoChat, demoSnapshot, demoUsage } from "./fixtures";
 
 async function island(): Promise<NonNullable<Window["__sb"]>> {
   for (;;) {
@@ -20,6 +21,13 @@ const full = demoSnapshot(Date.now());
 let snap: Snapshot = { ...full, sessions: full.sessions.map((s) => (s.pending.length ? { ...s, pending: [], status: "working" } : s)) };
 const push = () => sb.snapshot({ ...snap, now: Date.now() });
 push();
+
+// ?chat=demo starts with a finished conversation; without it the chat is off until the switch is used
+// (the bubble button or "/" opens it, the answers come from the scripted fake in src/core/chatfake.ts).
+if (new URLSearchParams(location.search).get("chat") === "demo") {
+  State.settings = { ...State.settings, chatEnabled: true };
+  for (const a of demoChat(Date.now())) sb.chat(a);
+}
 
 const PLAN = [
   "## Plan: fix the DATEV 409 handling",

@@ -1,6 +1,6 @@
 // Renders the island in one fixed state for the README screenshots
 // (scripts/screenshots.mjs). Pick it with ?state=strip|compact|expanded|approval|
-// question|reply|plan|finished|finished-merged. Made-up demo data only. Nothing
+// question|reply|plan|finished|finished-merged|chat|chat-empty|chat-off. Made-up demo data only. Nothing
 // here cycles: the page drives the island once, waits for it to settle and sets
 // document.body.dataset.ready = "1".
 
@@ -8,6 +8,8 @@ import "../src/style.css";
 import { State } from "../src/core/state";
 import type { Interaction, Session, Snapshot, Usage } from "../src/core/types";
 import { Island } from "../src/island/island";
+import { fakeChatListen } from "../src/core/chatfake";
+import { demoChat } from "./fixtures";
 
 // Mochi's blinks and particles use Math.random: seed it so every run draws the same face.
 let seed = 7;
@@ -133,6 +135,9 @@ async function run() {
   State.settings = { ...State.settings, soundEnabled: false, autoCloseInterval: 3600, compactInterval: 3600 };
   const island = new Island(root);
   island.applySettings();
+  // The scripted chat backend answers live, so the chat states can be tried by hand.
+  fakeChatListen((e) => island.onChatEvent(e));
+  (window as unknown as { island: Island }).island = island;
   // Mochi looks down towards the content instead of at the top-left corner.
   State.mouse = { x: 300, y: 260 };
 
@@ -159,6 +164,15 @@ async function run() {
       island.onSnapshot(snap(withSession(list, id, { status: "needs_you", pending: [item] })));
       break;
     }
+    case "chat":
+    case "chat-empty":
+    case "chat-off":
+      island.onSnapshot(snap(list));
+      State.settings = { ...State.settings, chatEnabled: state !== "chat-off" };
+      for (const a of demoChat(NOW, state === "chat" ? "full" : state === "chat-empty" ? "empty" : "off")) island.chatDispatch(a);
+      island.open();
+      island.openChat();
+      break;
     case "plan":
       island.onSnapshot(snap(list));
       island.onSnapshot(snap(withSession(list, "shop", { plan: PLAN })));

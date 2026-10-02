@@ -6,13 +6,14 @@ import { Ease, Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI } from "../core/bridge";
 import {
   EXPANDED_CORNER, EXPANDED_W, GREETING_W, PANEL_H, PANEL_W, ROUNDED_CORNER, STRIP_H, STRIP_W, botGlowColor, botGlowOpacity,
-  botPosition, colorForProject, islandSize, type IslandMode, type IslandViewName,
+  botPosition, colorForProject, islandSize, type BotEmoteName, type BotStateName, type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Cue, CueKind, Snapshot } from "../core/types";
 import { BotEngine, hexToRGB } from "../buddy/engine";
 import { Greeting } from "../buddy/greeting";
+import type { ChatAction, ChatEvent } from "../model/chat";
 import { FINISH_CARD_S, mergeFinish, planFinish, playsSound, type FinishItem } from "../model/finish";
 import { newPlan, planSession } from "../model/plan";
 import { autoWidth, clampHeight, largeHeight, maxHeight, panelFor, shouldResetSize, type Screen, type SizeAnchor } from "../model/size";
@@ -21,6 +22,7 @@ import { h } from "../views/dom";
 import { buildCompact } from "../views/compact";
 import { buildStrip } from "../views/strip";
 import { buildViews, type ViewActions, type ViewHost } from "../views/views";
+import { ChatController } from "./chat";
 import { IslandStateMachine } from "./fsm";
 
 const BOT_OVERHANG = 40;
@@ -41,7 +43,10 @@ const modeOrder = (m: IslandMode) => (m === "strip" ? 0 : m === "compact" ? 1 : 
 /** Views whose height follows their content (ViewHost.measure). */
 const MEASURED_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
 /** Views the grip and the enlarge button can make taller. */
-const SIZABLE_VIEWS: IslandViewName[] = ["session", "interaction", "finished"];
+const SIZABLE_VIEWS: IslandViewName[] = ["session", "interaction", "finished", "chat"];
+/** The chat stays open longer than the cards: people read and type in it. */
+const CHAT_CLOSE_MIN_S = 120;
+const CARD_CLOSE_MIN_S = 5;
 
 function screenSize(): Screen {
   const s = typeof window !== "undefined" ? window.screen : undefined;
@@ -78,6 +83,10 @@ export class Island {
   private botSize = new Spring(10);
 
   private engine = new BotEngine();
+  private chat: ChatController;
+  private chatShown = false;
+  /** The state the chat put in State.stateOverride, so only that one is ever cleared. */
+  private chatApplied: BotStateName | null = null;
   private greeting = new Greeting();
 
   private running = false;
@@ -119,6 +128,10 @@ export class Island {
     this.build();
     this.wireFsm();
     this.wireInput();
+    this.chat = new ChatController({
+      viewing: () => State.mode === "expanded" && State.view === "chat",
+      emote: (e) => this.chatEmote(e),
+    });
     this.engine.onDizzy = () => this.handleDizzy();
     this.greeting.onComplete = () => this.fsm.greetComplete();
     State.subscribe(() => {
@@ -145,6 +158,7 @@ export class Island {
       expand: () => this.fsm.forceHome(),
       collapse: () => this.collapse(),
       minimize: () => this.minimize(),
+      togglePin: () => this.togglePin(),
       answer: (requestId, answer) => void this.answer(requestId, answer),
       release: (requestId) => {
         Sound.play("blip");
@@ -155,6 +169,15 @@ export class Island {
       relayout: () => this.animateGeometry(false),
       redraw: () => State.notify(),
       toggleEnlarge: () => this.toggleEnlarge(),
+      openChat: () => this.openChat(),
+      closeChat: () => this.setView(this.defaultView()),
+      chat: {
+        send: (text, context) => this.chat.send(text, context),
+        stop: () => this.chat.stop(),
+        reset: () => this.chat.reset(),
+        setEnabled: (on) => this.chat.setEnabled(on),
+        typing: (on) => this.chat.typing(on),
+      },
       toggleRecent: () => {
         State.showRecent = !State.showRecent;
         Sound.play("blip");
@@ -244,6 +267,7 @@ export class Island {
       State.answerOpenFor = null;
       State.stepOpen = null;
       State.showRecent = false;
+      State.userPinned = false;
       State.isPinned = false;
       this.fsm.pinned = false;
       this.setKeyboard(false);
@@ -255,7 +279,14 @@ export class Island {
 
   /** The finished card closes sooner than the other views. */
   private closeDelay(): number {
-    return State.view === "finished" ? FINISH_CARD_S : State.settings.autoCloseInterval;
+    const set = State.settings.autoCloseInterval;
+    switch (State.view) {
+      case "chat": return Math.max(CHAT_CLOSE_MIN_S, set);
+      case "finished": return FINISH_CARD_S;
+      case "plan":
+      case "interaction": return Math.max(CARD_CLOSE_MIN_S, set);
+      default: return set;
+    }
   }
 
   private expand(view: IslandViewName) {
@@ -272,6 +303,9 @@ export class Island {
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
       State.view = view;
+      // forceHome armed the close timer with the default view's delay.
+      this.fsm.homeToPetitDelay = this.closeDelay();
+      this.rearmCollapse();
       this.animateGeometry(false);
       State.notify();
       return;
@@ -284,12 +318,14 @@ export class Island {
   }
 
   private collapse() {
+    State.userPinned = false;
     State.isPinned = false;
     this.fsm.pinned = false;
     this.fsm.forcePetit();
   }
 
   private minimize() {
+    State.userPinned = false;
     State.isPinned = false;
     this.fsm.pinned = false;
     this.fsm.forceStrip();
@@ -306,6 +342,53 @@ export class Island {
     this.fsm.forceHome();
   }
 
+  openChat() {
+    if (State.mode === "expanded" && State.view === "chat") this.views.get("chat")?.shown?.();
+    else this.setView("chat");
+  }
+
+  /** The chat's events come from the backend (src/main.ts). */
+  onChatEvent(event: ChatEvent) {
+    this.chat.onEvent(event);
+  }
+
+  /** Dev preview only: drive the chat transcript directly. */
+  chatDispatch(a: ChatAction) {
+    this.chat.dispatch(a);
+  }
+
+  /** Something in a session waits for the user: the chat never masks it. */
+  private needsUser(): boolean {
+    return State.allSessions.some((s) => s.live && (s.pending.length > 0 || s.status === "needs_you" || s.plan !== null));
+  }
+
+  private chatEmote(e: BotEmoteName) {
+    if (this.needsUser()) return;
+    // "proud" is for an answer that arrived elsewhere, the rest for the chat on screen.
+    if (e === "proud" ? this.chatShown : !this.chatShown) return;
+    if (e === "yawn") Sound.play("yawn");
+    this.engine.triggerEmote(e);
+    this.ensureRunning();
+  }
+
+  /** The chat drives Buddy only while its view is on screen and no session needs the user. */
+  private syncChatBuddy() {
+    const on = State.mode === "expanded" && State.view === "chat" && !this.needsUser();
+    if (on) {
+      const { state } = this.chat.buddy();
+      State.stateOverride = state;
+      this.chatApplied = state;
+    } else if (this.chatApplied !== null) {
+      if (State.stateOverride === this.chatApplied) State.stateOverride = null;
+      this.chatApplied = null;
+    }
+  }
+
+  /** Hover and love work on a calm Buddy, also while the chat holds it at idle. */
+  private buddyFree(): boolean {
+    return State.stateOverride == null || (State.stateOverride === "idle" && this.chatApplied === "idle");
+  }
+
   toggleFromHotkey() {
     if (State.mode === "expanded") {
       this.collapse();
@@ -313,6 +396,20 @@ export class Island {
     }
     this.fsm.forceHome();
     this.setKeyboard(true);
+  }
+
+  /** Only the user's pin survives; an alert's pin ends when its card is gone. */
+  private syncPin() {
+    State.isPinned = State.userPinned;
+    this.fsm.pinned = State.userPinned;
+  }
+
+  private togglePin() {
+    State.userPinned = !State.userPinned;
+    State.isPinned = State.userPinned || State.view === "interaction";
+    this.fsm.pinned = State.isPinned;
+    if (!State.isPinned) this.rearmCollapse();
+    State.notify();
   }
 
   /** After a pin is released with the cursor outside, restart the close timer (nothing else will). */
@@ -370,8 +467,7 @@ export class Island {
       this.setKeyboard(false);
       this.showPlan();
     } else if (queue.length === 0 && State.view === "interaction") {
-      State.isPinned = false;
-      this.fsm.pinned = false;
+      this.syncPin();
       this.setKeyboard(false);
       this.rearmCollapse();
       if (State.mode === "expanded") this.setView(this.defaultView());
@@ -428,8 +524,7 @@ export class Island {
     const shown = State.mode === "expanded" && State.view === "finished";
     State.finished = mergeFinish(State.finished, item, shown);
     State.focusId = item.sessionId;
-    State.isPinned = false;
-    this.fsm.pinned = false;
+    this.syncPin();
     if (State.mode !== "expanded") this.fsm.forceHome();
     this.expand("finished");
     this.rearmCollapse();
@@ -437,8 +532,7 @@ export class Island {
 
   /** The read-only plan card: opens like an alert but never pins, so it closes on its own. */
   private showPlan() {
-    State.isPinned = false;
-    this.fsm.pinned = false;
+    this.syncPin();
     if (State.mode !== "expanded") this.fsm.forceHome();
     this.expand("plan");
     this.rearmCollapse();
@@ -720,6 +814,11 @@ export class Island {
       }
       const typing = (e.target as Element | null)?.closest("input, textarea");
       if (typing) return;
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        this.openChat();
+        return;
+      }
       if (e.key === "ArrowRight" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault();
         this.cycleFocus(1);
@@ -762,7 +861,7 @@ export class Island {
       }
     }
 
-    const overBot = State.mode === "expanded" && State.stateOverride == null && this.isBotHit(x, y);
+    const overBot = State.mode === "expanded" && this.buddyFree() && this.isBotHit(x, y);
     if (overBot && !this.botHovering) this.botHoverIn(x, y);
     if (!overBot && this.botHovering) this.cancelBotHover();
     this.botHovering = overBot;
@@ -797,7 +896,7 @@ export class Island {
     if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
     this.botHoverTimer = window.setTimeout(() => {
       this.botHoverTimer = null;
-      if (!this.botHovering || State.stateOverride != null) return;
+      if (!this.botHovering || !this.buddyFree()) return;
       if (performance.now() / 1000 - this.lastLoveTime < 6) return;
       this.lastLoveTime = performance.now() / 1000;
       this.engine.triggerEmote("love");
@@ -892,7 +991,8 @@ export class Island {
     const settling = this.width.animating || this.height.animating || this.radius.animating || this.dragging;
     const animating =
       settling || !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-      greetingActive || this.engine.busy || State.flash != null || State.notice != null;
+      greetingActive || this.engine.busy || State.flash != null || State.notice != null ||
+      (State.mode === "expanded" && this.views.get(State.view)?.busy?.() === true);
 
     if (!animating && State.mode === "strip") {
       this.running = false;
@@ -950,6 +1050,11 @@ export class Island {
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = Math.tanh((State.mouse.x - (this.islandRect().x + this.botCx.value)) / 260);
     this.engine.lookY = -Math.tanh((State.mouse.y - this.botCy.value) / 200);
+    // Typing in the chat composer: eyes down and to the right, where the box is.
+    if (State.mode === "expanded" && State.view === "chat" && this.chat.buddy().lookDown) {
+      this.engine.lookX = 0.35;
+      this.engine.lookY = -0.85;
+    }
     this.engine.update(dt);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, hCss);
@@ -990,6 +1095,19 @@ export class Island {
       // The session view stays current while expanded: its rows decide the width of every view.
       if (on || (expanded && name === "session")) view.sync();
     }
+    const onChat = expanded && State.view === "chat";
+    if (onChat !== this.chatShown) {
+      this.chatShown = onChat;
+      const chatView = this.views.get("chat");
+      if (onChat) {
+        this.chat.opened();
+        chatView?.shown?.();
+      } else {
+        this.chat.closed();
+        chatView?.hidden?.();
+      }
+    }
+    this.syncChatBuddy();
     const big = this.sizable() && State.manualH != null;
     this.islandEl.classList.toggle("big", big);
     this.grip.classList.toggle("on", this.sizable() && !greetingActive);
@@ -1006,6 +1124,7 @@ export class Island {
     Sound.setVolume(State.settings.soundVolume);
     this.fsm.homeToPetitDelay = this.closeDelay();
     this.fsm.compactToStripDelay = State.settings.compactInterval;
+    this.chat.applySettings();
     State.notify();
   }
 }

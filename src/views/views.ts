@@ -6,6 +6,19 @@ import { buildSessionView } from "./expanded";
 import { buildInteraction } from "./cards";
 import { buildFinished } from "./finished";
 import { buildPlan } from "./plan";
+import { buildChatView } from "./chat";
+import type { SuggestionContext } from "../model/chat";
+
+export interface ChatActions {
+  send(text: string, context: SuggestionContext): void;
+  /** Stops the running answer. */
+  stop(): void;
+  /** A new chat: clears the transcript and the conversation. */
+  reset(): void;
+  setEnabled(on: boolean): void;
+  /** The user is (or stopped) typing in the composer: Buddy looks down at it. */
+  typing(on: boolean): void;
+}
 
 export interface ViewActions {
   focus(id: string): void;
@@ -16,6 +29,8 @@ export interface ViewActions {
   collapse(): void;
   /** Straight to the strip, without waiting for the compact card to rest. */
   minimize(): void;
+  /** The pin button: keep the island open, or let it close on its own again. */
+  togglePin(): void;
   answer(requestId: string, answer: unknown): void;
   release(requestId: string): void;
   openSettings(): void;
@@ -29,6 +44,11 @@ export interface ViewActions {
   redraw(): void;
   /** The enlarge button: natural size <-> large reading size. */
   toggleEnlarge(): void;
+  /** Show the chat view (the bubble button, the `/` key). */
+  openChat(): void;
+  /** Leave the chat view for the sessions. */
+  closeChat(): void;
+  chat: ChatActions;
 }
 
 export interface ViewHost {
@@ -43,10 +63,15 @@ export interface ViewHost {
   anchorId?(): string | null;
   /** Return true when the key was handled. */
   key?(e: KeyboardEvent): boolean;
+  /** The view just came on screen / just left it. */
+  shown?(): void;
+  hidden?(): void;
+  /** Something animates inside the view (it needs full frame rate). */
+  busy?(): boolean;
 }
 
-function simple(cls: string, title: string, sub: string): ViewHost {
-  const el = h("div", { class: `view ${cls}` }, h("div", { class: "title", text: title }), h("div", { class: "sub", text: sub }));
+function simple(cls: string, title: string, sub: string, extra?: Node): ViewHost {
+  const el = h("div", { class: `view ${cls}` }, h("div", { class: "title", text: title }), h("div", { class: "sub", text: sub }), extra);
   return { el, sync() {} };
 }
 
@@ -56,8 +81,9 @@ export function buildViews(actions: ViewActions): Map<IslandViewName, ViewHost> 
     ["interaction", buildInteraction(actions)],
     ["plan", buildPlan(actions)],
     ["finished", buildFinished(actions)],
-    ["empty", simple("empty-view", "No Claude Code sessions yet", "Start claude in any terminal. Sessions appear here on their first event.")],
+    ["empty", simple("empty-view", "No Claude Code sessions yet", "Start claude in any terminal. Sessions appear here on their first event.", h("button", { class: "tab chat-link", text: "Chat with Buddy", title: "Chat with Buddy (/)", onclick: (e: Event) => { e.stopPropagation(); actions.openChat(); } }))],
     ["confused", simple("confused-view", "Ouch.", "Give Buddy a second.")],
     ["greeting", { el: h("div", { class: "view" }), sync() {} }],
+    ["chat", buildChatView(actions)],
   ]);
 }

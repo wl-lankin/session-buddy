@@ -6,6 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Settings } from "./state";
 import type { Snapshot } from "./types";
+import type { ChatEvent, ChatStatus } from "../model/chat";
+import { fakeChat, fakeChatListen } from "./chatfake";
 
 export const IS_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -16,7 +18,7 @@ function browserInvoke(cmd: string, args?: Record<string, unknown>) {
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!IS_TAURI) {
     browserInvoke(cmd, args);
-    return null;
+    return (fakeChat(cmd, args)?.value as T | undefined) ?? null;
   }
   try {
     return await invoke<T>(cmd, args);
@@ -31,7 +33,8 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 async function attempt<T>(cmd: string, args?: Record<string, unknown>): Promise<Result<T>> {
   if (!IS_TAURI) {
     browserInvoke(cmd, args);
-    return { ok: false, error: "Not running inside Session Buddy." };
+    const fake = fakeChat(cmd, args);
+    return fake ? { ok: true, value: fake.value as T } : { ok: false, error: "Not running inside Session Buddy." };
   }
   try {
     return { ok: true, value: await invoke<T>(cmd, args) };
@@ -77,9 +80,17 @@ export const Bridge = {
   /** Opens one of the settings footer links (Rust accepts only those). */
   openLink: (url: string) => call<void>("open_link", { url }),
   quit: () => call<void>("quit_app"),
+  chatSend: (text: string) => attempt<void>("chat_send", { text }),
+  chatWake: () => call<void>("chat_wake"),
+  chatInterrupt: () => call<void>("chat_interrupt"),
+  chatReset: () => call<void>("chat_reset"),
+  chatStatus: () => call<ChatStatus>("chat_status"),
 };
 
 export async function onEvent<T>(name: string, handler: (payload: T) => void) {
-  if (!IS_TAURI) return;
+  if (!IS_TAURI) {
+    if (name === "chat-event") fakeChatListen(handler as (e: ChatEvent) => void);
+    return;
+  }
   await listen<T>(name, (e) => handler(e.payload));
 }

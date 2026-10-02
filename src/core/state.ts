@@ -31,6 +31,8 @@ export interface Settings {
   /** An alias (haiku, sonnet, opus) or a full model id; Claude only. */
   chatModel: string;
   chatOllamaModel: string;
+  /** Off until switched on: no Ollama group in the model menu, no connection attempt. */
+  ollamaEnabled: boolean;
   chatOllamaUrl: string;
   chatClaudePath: string;
   /** Web search, or control of Claude Code sessions (never both: a web page must not steer sessions). */
@@ -65,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   chatProvider: "claude",
   chatModel: "haiku",
   chatOllamaModel: "",
+  ollamaEnabled: false,
   chatOllamaUrl: "http://localhost:11434",
   chatClaudePath: "",
   chatMode: "web",

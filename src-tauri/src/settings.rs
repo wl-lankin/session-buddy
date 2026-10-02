@@ -37,6 +37,8 @@ pub struct Settings {
     pub chat_model: String,
     pub chat_ollama_model: String,
     pub chat_ollama_url: String,
+    /// Off until the user turns it on: no Ollama group in the model menu and no connection attempt.
+    pub ollama_enabled: bool,
     /// Empty = look for the `claude` CLI in the usual places.
     pub chat_claude_path: String,
     /// "web" (web tools) or "control" (the session tools, no web).
@@ -65,6 +67,9 @@ impl Settings {
         }
         if !HOSTS.contains(&self.chat_session_host.as_str()) {
             self.chat_session_host = "background".into();
+        }
+        if !self.ollama_enabled && self.chat_provider == "ollama" {
+            self.chat_provider = "claude".into();
         }
     }
 
@@ -96,6 +101,7 @@ impl Default for Settings {
             chat_model: "haiku".into(),
             chat_ollama_model: String::new(),
             chat_ollama_url: "http://localhost:11434".into(),
+            ollama_enabled: false,
             chat_claude_path: String::new(),
             chat_mode: "web".into(),
             chat_project_roots: Vec::new(),
@@ -111,8 +117,18 @@ fn path() -> PathBuf {
     sb_common::config_dir().join("settings.json")
 }
 
+/// Files from before the switch existed keep working: whoever had picked a local model keeps Ollama on.
+fn from_bytes(bytes: &[u8]) -> Option<Settings> {
+    let raw: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let mut settings: Settings = serde_json::from_value(raw.clone()).ok()?;
+    if raw.get("ollamaEnabled").is_none() {
+        settings.ollama_enabled = settings.chat_provider == "ollama" || !settings.chat_ollama_model.is_empty();
+    }
+    Some(settings)
+}
+
 pub fn load() -> Settings {
-    let mut settings: Settings = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let mut settings = std::fs::read(path()).ok().and_then(|b| from_bytes(&b)).unwrap_or_default();
     settings.clamp();
     settings
 }
@@ -126,6 +142,29 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ollama_is_off_by_default_and_stays_on_for_those_who_use_it() {
+        assert!(!Settings::default().ollama_enabled);
+        let fresh = from_bytes(br#"{"soundEnabled": true}"#).unwrap();
+        assert!(!fresh.ollama_enabled);
+        let user = from_bytes(br#"{"chatProvider": "ollama", "chatOllamaModel": "qwen2.5:7b"}"#).unwrap();
+        assert!(user.ollama_enabled);
+        let picked_once = from_bytes(br#"{"chatOllamaModel": "gemma2:9b"}"#).unwrap();
+        assert!(picked_once.ollama_enabled);
+        let said_no = from_bytes(br#"{"chatOllamaModel": "gemma2:9b", "ollamaEnabled": false}"#).unwrap();
+        assert!(!said_no.ollama_enabled);
+    }
+
+    #[test]
+    fn switching_ollama_off_puts_the_chat_back_on_claude() {
+        let mut s = Settings { chat_provider: "ollama".into(), ollama_enabled: false, ..Settings::default() };
+        s.clamp();
+        assert_eq!(s.chat_provider, "claude");
+        let mut on = Settings { chat_provider: "ollama".into(), ollama_enabled: true, ..Settings::default() };
+        on.clamp();
+        assert_eq!(on.chat_provider, "ollama");
+    }
 
     #[test]
     fn older_files_get_the_default_finish_style() {

@@ -72,6 +72,14 @@ npm run pack
 
 On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org). *(Applied for; until it is granted the Windows installers are unsigned, see the notes above. macOS builds are not signed by SignPath.)*
+
+- **Authors, reviewers and approvers:** [@wl-lankin](https://github.com/wl-lankin), the maintainer. Every release is approved by hand before it is signed and published.
+- **What is signed:** only the Windows installer built by this repository's [release workflow](.github/workflows/release.yml) from a tagged commit, never a local build.
+- **Privacy:** see [Privacy](#privacy). This program does not send anything anywhere on its own except what is listed there: the usage endpoint (a request to Anthropic with your own Claude Code login), the optional update check against GitHub Releases, and the chat you switch on yourself.
+
 ## Setup
 
 1. Open the tray icon (Windows) or menu bar icon (macOS) > **Settings...**

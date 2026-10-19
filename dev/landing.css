@@ -34,7 +34,8 @@ body.landing #island { pointer-events: auto; }
 @keyframes tdot { 50% { opacity: 0.35; } }
 
 .term-body { flex: 1; overflow: hidden; padding: 16px 18px; font-size: 12.5px; line-height: 1.6; color: #d4d7dd; display: flex; flex-direction: column; justify-content: flex-end; }
-.term-body .ln { white-space: pre-wrap; word-break: break-word; animation: tin 0.25s ease-out both; }
+.term-body .ln { white-space: pre-wrap; word-break: break-word; }
+.term-body .fresh { animation: tin 0.25s ease-out both; }
 @keyframes tin { from { opacity: 0; transform: translateY(4px); } }
 .ln .mut { color: #6b7079; }
 .ln .ok { color: #34d399; }
@@ -46,7 +47,7 @@ body.landing #island { pointer-events: auto; }
 .ln.spin .acc { display: inline-block; animation: spin 1.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.box { margin: 8px 0 4px; padding: 10px 12px; border: 1px solid rgba(217, 119, 87, 0.55); border-radius: 8px; animation: tin 0.25s ease-out both; }
+.box { margin: 8px 0 4px; padding: 10px 12px; border: 1px solid rgba(217, 119, 87, 0.55); border-radius: 8px; }
 .box b { color: #f5f6f8; font-weight: 600; }
 .box .q { margin: 8px 0 6px; color: #f5f6f8; }
 .box button {

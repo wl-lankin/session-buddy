@@ -116,32 +116,60 @@ const tell = (msg: Record<string, unknown>) => parent !== window && parent.postM
 const tabsEl = document.getElementById("termTabs")!;
 const bodyEl = document.getElementById("termBody")!;
 
+// Draws only what changed: tabs are updated in place and only new lines fade in,
+// so the terminal never flickers on a beat where nothing happened.
+const shown = {} as Record<Id, number>;
+let shownTab: Id | null = null;
+let shownBox = "";
+let lastHtml = "";
+
 function renderTerm() {
-  tabsEl.innerHTML = ORDER.map((id) => {
-    const s = runs[id].session;
-    return `<button class="term-tab${id === active ? " on" : ""}" data-id="${id}"><span class="dot ${s.status}"></span>${id}</button>`;
-  }).join("");
+  if (tabsEl.children.length !== ORDER.length) {
+    tabsEl.innerHTML = ORDER.map((id) => `<button class="term-tab" data-id="${id}"><span class="dot"></span>${id}</button>`).join("");
+  }
+  ORDER.forEach((id, i) => {
+    const tab = tabsEl.children[i] as HTMLElement;
+    tab.classList.toggle("on", id === active);
+    const dot = tab.firstElementChild as HTMLElement;
+    const cls = `dot ${runs[id].session.status}`;
+    if (dot.className !== cls) dot.className = cls;
+  });
   const r = runs[active];
+  if (shownTab !== active) {
+    // A tab switch shows the tab as it is, without replaying its lines.
+    shownTab = active;
+    shown[active] = r.lines.length;
+    shownBox = r.waiting?.requestId ?? "";
+  }
+  const from = Math.max(0, r.lines.length - 14);
+  const fresh = shown[active] ?? 0;
+  const boxFresh = !!r.waiting && r.waiting.requestId !== shownBox;
   const busy = r.session.status === "working" || r.session.status === "thinking";
-  bodyEl.innerHTML = r.lines.slice(-14).map((l) => `<div class="ln">${l}</div>`).join("")
-    + (r.waiting ? box(active, r.waiting) : "")
+  const html = r.lines.slice(from).map((l, i) => `<div class="ln${from + i >= fresh ? " fresh" : ""}">${l}</div>`).join("")
+    + (r.waiting ? box(active, r.waiting, boxFresh) : "")
     + (busy && !r.waiting ? `<div class="ln spin"><span class=acc>✻</span> <span class=mut>${r.session.status === "thinking" ? "Thinking" : "Working"}… (esc to interrupt)</span></div>` : "")
     + (!busy && !r.waiting ? `<div class="ln prompt">&gt; <span class=mut>▍</span></div>` : "");
+  shown[active] = r.lines.length;
+  shownBox = r.waiting?.requestId ?? "";
+  if (html.replace(/ fresh/g, "") === lastHtml) return;
+  lastHtml = html.replace(/ fresh/g, "");
+  bodyEl.innerHTML = html;
 }
 
 // Claude Code's own prompt for the waiting interaction, answerable right here, as in the real terminal.
-function box(id: Id, it: Interaction): string {
+function box(id: Id, it: Interaction, fresh: boolean): string {
+  const cls = fresh ? "box fresh" : "box";
   if (it.kind === "approval") {
-    return `<div class="box"><b>Bash command</b><div class="q">  ${esc(it.target.replace(/^Bash · /, ""))}</div>Do you want to proceed?
+    return `<div class="${cls}"><b>Bash command</b><div class="q">  ${esc(it.target.replace(/^Bash · /, ""))}</div>Do you want to proceed?
       <button class="sel" data-a="allow" data-id="${id}">1. Yes</button><button data-a="deny" data-id="${id}">2. No, and tell Claude what to do differently</button></div>`;
   }
   if (it.kind === "question") {
     const q = it.questions[0];
-    return `<div class="box"><b>${esc(q.header ?? "Question")}</b><div class="q">${esc(q.question)}</div>
+    return `<div class="${cls}"><b>${esc(q.header ?? "Question")}</b><div class="q">${esc(q.question)}</div>
       ${q.options.map((o, i) => `<button class="${i ? "" : "sel"}" data-a="pick:${esc(o.label)}" data-id="${id}">${i + 1}. ${esc(o.label)}</button>`).join("")}</div>`;
   }
   if (it.kind === "reply") {
-    return `<div class="ln">⏺ ${esc(it.message)}</div><div class="box"><button class="sel" data-a="reply:Yes, open it" data-id="${id}">Yes, open it</button><button data-a="reply:Not yet" data-id="${id}">Not yet</button><div class="hint">Type a reply, or answer on the island.</div></div>`;
+    return `<div class="ln">⏺ ${esc(it.message)}</div><div class="${cls}"><button class="sel" data-a="reply:Yes, open it" data-id="${id}">Yes, open it</button><button data-a="reply:Not yet" data-id="${id}">Not yet</button><div class="hint">Type a reply, or answer on the island.</div></div>`;
   }
   return "";
 }

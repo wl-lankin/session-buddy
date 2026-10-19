@@ -6,3 +6,4 @@
 *.log
 .DS_Store
 /.superpowers
+/dist-landing

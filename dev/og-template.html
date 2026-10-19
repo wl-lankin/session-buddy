@@ -22,4 +22,12 @@ p{margin:22px 0 0;font:400 19px/1.45 var(--body);color:#9398a1}
 <p>Antworten, ohne den richtigen Terminal-Tab zu suchen.</p>
 <div class="chips"><span>Kostenlos</span><span>Open Source</span><span>macOS</span><span>Windows</span></div></div>
 <iframe id="demo" src="demo/"></iframe>
+<script>
+  // Give the terminal some air below the opened island: the image is a still, not the live page.
+  document.getElementById('demo').addEventListener('load', e => {
+    const st = e.target.contentDocument.createElement('style');
+    st.textContent = '.term { top: 35% !important; height: 58% !important; }';
+    e.target.contentDocument.head.append(st);
+  });
+</script>
 </div></body></html>

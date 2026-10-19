@@ -9,6 +9,7 @@
     "test": "vitest run",
     "icons": "node scripts/gen-icons.mjs",
     "screenshots": "node scripts/screenshots.mjs",
+    "landing": "vite build --config vite.landing.config.ts",
     "tauri": "tauri",
     "prebuild": "cargo build --profile relay -p sb-relay",
     "pack": "tauri build"

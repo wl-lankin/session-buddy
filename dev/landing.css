@@ -10,7 +10,7 @@ body.landing #island { pointer-events: auto; }
 #desk { position: fixed; inset: 0; font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; }
 
 .term {
-  position: absolute; right: 4%; top: 24%; width: min(47%, 660px); height: 64%;
+  position: absolute; right: 3%; top: 24%; width: min(38%, 620px); height: 64%;
   display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
   background: rgba(13, 15, 20, 0.92); backdrop-filter: blur(20px);
   box-shadow: 0 40px 90px -20px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08);

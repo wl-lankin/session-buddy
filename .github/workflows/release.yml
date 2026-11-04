@@ -1,5 +1,6 @@
 # Builds the installers and the signed updater artifacts (latest.json, .sig files) and attaches
 # them to a draft GitHub release. The installed apps see the update once the draft is published.
+# The Windows binaries and installer are Authenticode-signed (docs/CODE-SIGNING.md).
 # createUpdaterArtifacts lives in tauri.updater.conf.json, passed only here, because it makes
 # `tauri build` demand the signing key and source builds have none.
 # Push a tag like v1.0.0 (normal release) or v1.0.0-beta.1 (prerelease), or run it
@@ -19,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # Windows signing logs in to Azure Artifact Signing through OIDC
 
 jobs:
   build:
@@ -31,8 +33,12 @@ jobs:
           - platform: macos-latest
             args: "--target universal-apple-darwin --config src-tauri/tauri.updater.conf.json --config src-tauri/tauri.universal.conf.json"
     runs-on: ${{ matrix.platform }}
+    # The Azure login for signing only trusts jobs in this environment.
+    environment: release
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,9 +55,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build the relay (Windows)
+      # The app and the installer are signed inside tauri build, so the updater .sig files are
+      # made over the signed installer. The relay is a bundle resource, which Tauri does not sign.
+      - name: Prepare code signing (Windows)
+        id: signing
         if: matrix.platform == 'windows-latest'
-        run: cargo build --profile relay -p sb-relay
+        uses: ./.github/actions/windows-signing
+        with:
+          description: Session Buddy
+
+      - name: Build and sign the relay (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          cargo build --profile relay -p sb-relay
+          pwsh -NoProfile -File .github/actions/windows-signing/sign.ps1 target/relay/sb-relay.exe
 
       # npm run build (the beforeBuildCommand) rebuilds target/relay/sb-relay for the
       # host only, so the universal relay lives in its own folder and an extra
@@ -92,7 +109,7 @@ jobs:
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
         env:
-          INSTALL_HINTS: "The first install on a machine is manual and the installers are not code-signed yet, so it needs one extra step. Windows: SmartScreen > More info > Run anyway. macOS: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`. Apps that already include the updater offer this version on the island and install it on one click (signature-checked)."
+          INSTALL_HINTS: "The first install on a machine is manual. The Windows installer is code-signed (Wolfgang Linz); while the certificate is still new, SmartScreen can still ask once: More info > Run anyway. The macOS app is not signed yet: System Settings > Privacy & Security > Open Anyway after the first try, or run `xattr -dr com.apple.quarantine \"/Applications/Session Buddy.app\"`. Apps that already include the updater offer this version on the island and install it on one click (signature-checked)."
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -107,4 +124,4 @@ jobs:
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           prerelease: ${{ contains(env.TAG, '-') }}
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }}${{ steps.signing.outputs.config && format(' --config {0}', steps.signing.outputs.config) || '' }}

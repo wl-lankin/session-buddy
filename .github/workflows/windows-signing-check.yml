@@ -1,0 +1,74 @@
+# Builds and signs the Windows installer without releasing anything, then checks the signatures.
+# Runs on pull requests that touch the signing setup, or by hand. The installer is kept as a workflow artifact.
+
+name: Windows signing check
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/windows-signing/**
+      - .github/workflows/windows-signing-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    environment: release
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Prepare code signing
+        id: signing
+        uses: ./.github/actions/windows-signing
+        with:
+          description: Session Buddy
+
+      - name: Build and sign the relay
+        run: |
+          cargo build --profile relay -p sb-relay
+          pwsh -NoProfile -File .github/actions/windows-signing/sign.ps1 target/relay/sb-relay.exe
+
+      - name: Build and sign
+        run: npx tauri build --config "${{ steps.signing.outputs.config }}"
+
+      # Checks the installer and the binaries inside it: Tauri signs the app before makensis
+      # packs it, but leaves target/release/session-buddy.exe unsigned afterwards.
+      - name: Check the signatures
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*.exe
+          $unpacked = Join-Path $env:RUNNER_TEMP 'installer'
+          7z x $setup.FullName "-o$unpacked" -y | Out-Null
+          $files = @($setup) + @(Get-ChildItem $unpacked -Recurse -Include session-buddy.exe, sb-relay.exe)
+          if ($files.Count -lt 3) { throw "Expected the installer, the app and the relay, found: $($files.Name -join ', ')" }
+          $bad = 0
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            "{0}: {1} | {2} | timestamp: {3}" -f $f.Name, $s.Status, $s.SignerCertificate.Subject, ($null -ne $s.TimeStamperCertificate)
+            if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'CN=Wolfgang Linz' -or -not $s.TimeStamperCertificate) { $bad++ }
+          }
+          if ($bad) { throw "$bad file(s) not signed correctly" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: session-buddy-windows-signed
+          path: target/release/bundle/nsis/*.exe
+          retention-days: 7

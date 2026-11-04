@@ -1,27 +1,23 @@
 # Code signing (Windows)
 
-The Windows installer is not signed yet, so Windows SmartScreen warns on the first manual install ("Windows protected your PC": More info > Run anyway). Free signing for open source is available from the [SignPath Foundation](https://signpath.org/terms.html). This file is the plan and the checklist.
+The Windows app, the relay and the installer are Authenticode-signed with [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/) (formerly Trusted Signing). The certificate names "Wolfgang Linz" as publisher; Microsoft validated the identity.
 
-## State
+## Azure
 
-- The README has the "Code signing policy" section SignPath requires (heading, the attribution sentence, roles, privacy).
-- The application to the SignPath Foundation is made by the maintainer (it needs their identity and GitHub two-factor).
-- The release workflow does NOT sign yet: the SignPath project, policy and token do not exist until the application is approved.
+- Subscription "Azure subscription 1", resource group `code-signing`, account `wolfganglinz-signing` (North Europe, endpoint `https://neu.codesigning.azure.net`, Basic plan).
+- Certificate profile `wolfganglinz-public` (Public Trust, street address and postal code left out). Its certificates live only a few days and are renewed by Azure; the timestamp keeps a signature valid after that.
+- App registration `github-code-signing` with the role "Artifact Signing Certificate Profile Signer" on the account only. It has no secret: a federated credential trusts GitHub OIDC tokens for `repo:wl-lankin/session-buddy:environment:release`.
 
-## When SignPath approves
+## GitHub
 
-1. In SignPath: note the organization id, the project slug and the signing policy slug; create an API token for CI; add them as repository secrets (`SIGNPATH_API_TOKEN`) and variables (`SIGNPATH_ORGANIZATION_ID`, project and policy slugs).
-2. Release workflow, Windows job, in this order:
-   1. Build the installer unsigned (no updater artifacts yet).
-   2. Upload it as a workflow artifact and submit it to SignPath with `signpath/github-action-submit-signing-request` (origin verification is required for the foundation certificate: the artifact must come from this repository's workflow run). The maintainer approves the request in SignPath (every release needs one manual approval).
-   3. Download the signed installer.
-   4. Create the updater signature (minisign, `tauri signer sign`) over the SIGNED installer. The signature must be made after Authenticode signing: signing changes the bytes, a signature made before would no longer match.
-   5. Build `latest.json` for the signed installer (the same shape tauri-action writes today) and upload installer, `.sig` and `latest.json` to the draft release.
-3. Installer metadata: the SignPath policy checks product name and version in the file's metadata; make sure the NSIS installer carries them (Tauri takes them from `tauri.conf.json`).
-4. Keep the macOS job as it is.
+- Environment `release`; the release and the check workflow run their Windows job in it.
+- Repository variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (ids, not secrets).
+- `.github/actions/windows-signing` downloads Microsoft's signing client (pinned version and SHA-256), writes its `metadata.json` and a Tauri config with `bundle.windows.signCommand`. `sign.ps1` fetches a fresh OIDC token for every file and runs `signtool` with the client's dlib.
+- The release workflow signs the relay right after building it, then passes the signing config to `tauri build`. Tauri signs the app and the installer during the build, so the updater `.sig` files are made over the signed installer.
+- `windows-signing-check.yml` builds and signs without releasing and checks the signatures. It runs on pull requests that touch the signing setup, or by hand.
 
 ## Notes
 
-- SmartScreen reputation: a signed installer can still warn for a while until the certificate has built up reputation; the signature makes the publisher name show instead of "Unknown publisher".
+- SmartScreen reputation: a signed installer can still warn for a while until the certificate has built up reputation; the publisher name shows instead of "Unknown publisher".
 - An update that the app downloads itself carries no "downloaded from the internet" mark, so SmartScreen does not warn there, signed or not.
-- Alternative route, not taken: Microsoft Store with an MSIX. It costs nothing now, but a packaged app's `%LOCALAPPDATA%` writes are redirected into the package (our relay and config would have to move out of AppData), it cannot use our own updater, it needs Microsoft's certification, and a managed PC may block the Store.
+- macOS signing and notarization need the Apple Developer Program and are not set up yet.

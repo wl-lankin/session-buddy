@@ -47,7 +47,7 @@ Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/s
 - **Windows**: `Session Buddy_1.0.14_x64-setup.exe`. Installs for the current user, no admin needed.
 - **macOS**: `Session Buddy_1.0.14_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
-The builds are not code-signed yet, so the first start needs one extra click:
+From 1.0.15 on the Windows installer is code-signed; while the certificate is still new, SmartScreen can still ask once. The macOS app is not signed yet. So the first start may need one extra click:
 
 - **Windows SmartScreen**: "Windows protected your PC" > **More info** > **Run anyway**.
 - **macOS Gatekeeper**: open the app once and click **Done**, then System Settings > Privacy & Security > **Open Anyway** (macOS 15 and later no longer offer right-click > Open). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
@@ -74,10 +74,10 @@ On a MacBook with a notch the island wraps around it: the strip sits in the menu
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org). *(Applied for; until it is granted the Windows installers are unsigned, see the notes above. macOS builds are not signed by SignPath.)*
+The Windows binaries and installer are signed with [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/) under the name Wolfgang Linz (identity validated by Microsoft). macOS builds are not signed yet.
 
-- **Authors, reviewers and approvers:** [@wl-lankin](https://github.com/wl-lankin), the maintainer. Every release is approved by hand before it is signed and published.
-- **What is signed:** only the Windows installer built by this repository's [release workflow](.github/workflows/release.yml) from a tagged commit, never a local build.
+- **Authors, reviewers and approvers:** [@wl-lankin](https://github.com/wl-lankin), the maintainer. Every release is approved by hand before it is published.
+- **What is signed:** only what this repository's [release workflow](.github/workflows/release.yml) builds from a tagged commit (the app, the relay and the installer), never a local build. The workflow signs in to Azure through GitHub OIDC; there is no stored signing key or password.
 - **Privacy:** see [Privacy](#privacy). This program does not send anything anywhere on its own except what is listed there: the usage endpoint (a request to Anthropic with your own Claude Code login), the optional update check against GitHub Releases, and the chat you switch on yourself.
 
 ## Setup

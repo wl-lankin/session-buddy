@@ -6,7 +6,7 @@ The Windows app, the relay and the installer are Authenticode-signed with [Azure
 
 - Subscription "Azure subscription 1", resource group `code-signing`, account `wolfganglinz-signing` (North Europe, endpoint `https://neu.codesigning.azure.net`, Basic plan).
 - Certificate profile `wolfganglinz-public` (Public Trust, street address and postal code left out). Its certificates live only a few days and are renewed by Azure; the timestamp keeps a signature valid after that.
-- App registration `github-code-signing` with the role "Artifact Signing Certificate Profile Signer" on the account only. It has no secret: a federated credential trusts GitHub OIDC tokens for `repo:wl-lankin/session-buddy:environment:release`.
+- App registration `github-code-signing` with the role "Artifact Signing Certificate Profile Signer" on the account only. It has no secret: a federated credential trusts GitHub OIDC tokens for `repo:wl-lankin@27097016/session-buddy@1399712906:environment:release` (GitHub puts the owner and repository ids into the subject; a renamed repository keeps working).
 
 ## GitHub
 

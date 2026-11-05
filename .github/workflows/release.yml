@@ -125,3 +125,22 @@ jobs:
           updaterJsonPreferNsis: true
           prerelease: ${{ contains(env.TAG, '-') }}
           args: ${{ matrix.args }}${{ steps.signing.outputs.config && format(' --config {0}', steps.signing.outputs.config) || '' }}
+
+  # The same installers under fixed names (Session-Buddy-macOS.dmg, Session-Buddy-Windows-Setup.exe),
+  # so .../releases/latest/download/<name> never changes. Copied after both builds have uploaded.
+  fixed-names:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Attach installers under fixed names
+        run: |
+          version=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sed -n 's/^Session\.Buddy_\(.*\)_x64-setup\.exe$/\1/p' | head -1)
+          [ -n "$version" ] || { echo "::error::No Windows installer on the release $TAG"; exit 1; }
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "Session.Buddy_${version}_x64-setup.exe" --pattern "Session.Buddy_${version}_universal.dmg"
+          mv "Session.Buddy_${version}_x64-setup.exe" Session-Buddy-Windows-Setup.exe
+          mv "Session.Buddy_${version}_universal.dmg" Session-Buddy-macOS.dmg
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber Session-Buddy-Windows-Setup.exe Session-Buddy-macOS.dmg

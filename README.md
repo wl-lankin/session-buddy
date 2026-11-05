@@ -2,7 +2,7 @@
 
 **All your Claude Code sessions in one small island at the top of the screen, and a way to answer them without hunting for the right terminal tab.**
 
-![Version 1.0.14](https://img.shields.io/badge/version-1.0.14-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
+![Version 1.0.15](https://img.shields.io/badge/version-1.0.15-22d3ee) ![Windows and macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6366f1) ![License MIT](https://img.shields.io/badge/license-MIT-34d399)
 
 ![The expanded island: session tabs, the focused session with steps, agents and background tasks, and the account limits](docs/media/expanded.png)
 
@@ -44,12 +44,11 @@ When you run several Claude Code sessions in a terminal at once, one of them is 
 
 Get the latest installer from **[GitHub Releases](https://github.com/wl-lankin/session-buddy/releases/latest)**:
 
-- **Windows**: `Session Buddy_1.0.14_x64-setup.exe`. Installs for the current user, no admin needed.
-- **macOS**: `Session Buddy_1.0.14_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
+- **Windows**: `Session Buddy_1.0.15_x64-setup.exe`. Installs for the current user, no admin needed.
+- **macOS**: `Session Buddy_1.0.15_universal.dmg` (Apple silicon and Intel). Drag the app to Applications.
 
-From 1.0.15 on the Windows installer is code-signed; while the certificate is still new, SmartScreen can still ask once. The macOS app is not signed yet. So the first start may need one extra click:
+The Windows installer and app are digitally signed (publisher Wolfgang Linz), so Windows does not warn about an unknown publisher. The macOS app is not signed yet, so its first start needs one extra click:
 
-- **Windows SmartScreen**: "Windows protected your PC" > **More info** > **Run anyway**.
 - **macOS Gatekeeper**: open the app once and click **Done**, then System Settings > Privacy & Security > **Open Anyway** (macOS 15 and later no longer offer right-click > Open). Or in a terminal: `xattr -dr com.apple.quarantine "/Applications/Session Buddy.app"`.
 
 **Upgrading on Windows from an older "session-buddy" build?** Uninstall the old app first (Settings > Apps), because the install folder name changed. Your hooks and settings stay where they are.
@@ -67,7 +66,7 @@ npm install
 npm run pack
 ```
 
-- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.14_x64-setup.exe`.
+- Windows: run `target/release/bundle/nsis/Session Buddy_1.0.15_x64-setup.exe`.
 - macOS: copy `target/release/bundle/macos/Session Buddy.app` to `/Applications` and open it.
 
 On a MacBook with a notch the island wraps around it: the strip sits in the menu bar beside the notch, and the island grows down out of it. On other Macs it hangs centred just below the menu bar, on Windows from the top edge of the screen.
